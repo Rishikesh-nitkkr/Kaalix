@@ -22,15 +22,25 @@
             </div>
         </div>
         <nav class="nav-list" aria-label="Main navigation">
+            <span class="nav-group">Core</span>
             <button class="nav-item active" data-screen="dashboard"><span class="nav-icon">D</span>Dashboard</button>
+            <button class="nav-item" data-screen="goals"><span class="nav-icon">G</span>Goals</button>
             <button class="nav-item" data-screen="daily"><span class="nav-icon">T</span>Daily Tracker</button>
+            <button class="nav-item" data-screen="streak"><span class="nav-icon">7</span>Daily Streak</button>
+            <button class="nav-item" data-screen="focus"><span class="nav-icon">F</span>Focus Mode</button>
+            <span class="nav-group">Planning</span>
             <button class="nav-item" data-screen="timetable"><span class="nav-icon">S</span>Timetable</button>
-            <button class="nav-item" data-screen="music"><span class="nav-icon">M</span>Music System</button>
+            <button class="nav-item" data-screen="notes"><span class="nav-icon">N</span>Notes</button>
             <button class="nav-item" data-screen="study"><span class="nav-icon">A</span>Study / DSA</button>
+            <span class="nav-group">Insights</span>
+            <button class="nav-item" data-screen="report"><span class="nav-icon">J</span>AI Report</button>
+            <button class="nav-item" data-screen="analytics"><span class="nav-icon">Y</span>Analytics</button>
+            <span class="nav-group optional-group">More</span>
+            <button class="nav-item" data-screen="music"><span class="nav-icon">M</span>Music System</button>
             <button class="nav-item" data-screen="reels"><span class="nav-icon">R</span>Reel Analysis</button>
             <button class="nav-item" data-screen="wardrobe"><span class="nav-icon">W</span>Wardrobe</button>
             <button class="nav-item" data-screen="friends"><span class="nav-icon">F</span>Friends</button>
-            <button class="nav-item" data-screen="report"><span class="nav-icon">J</span>AI Report</button>
+            <span class="nav-group">System</span>
             <button class="nav-item" data-screen="settings"><span class="nav-icon">S</span>Settings</button>
         </nav>
         <div class="sidebar-art">
@@ -97,10 +107,30 @@
                 <div class="summary-item"><div id="analyticsXp" class="summary-val">0</div><div class="summary-lbl">Total TXP</div></div>
                 <div class="summary-item"><div id="productivityScore" class="summary-val">0%</div><div class="summary-lbl">Productivity</div></div>
                 <div class="summary-item"><div id="productiveReelCount" class="summary-val">0</div><div class="summary-lbl">Useful Reels</div></div>
-                <div class="summary-item"><div class="summary-val">MONARCH</div><div class="summary-lbl">Target Rank</div></div>
-                <div class="summary-item"><div class="summary-val">LIVE</div><div class="summary-lbl">AI Mode</div></div>
+                <button id="goalOpenBtn" class="summary-item goal-summary" type="button"><div id="goalSummaryValue" class="summary-val">0/0</div><div class="summary-lbl">Goal</div></button>
+                <div class="summary-item"><div id="identityValue" class="summary-val">SURVIVOR</div><div class="summary-lbl">Identity</div></div>
             </div>
             <div class="grid three-col">
+                <article class="card span-two status-panel">
+                    <div class="card-head"><h3>Status Panel</h3><span id="statusRankCap" class="tag">Rank cap active</span></div>
+                    <div class="status-grid">
+                        <div><span>Level</span><strong id="statusLevel">1</strong></div>
+                        <div><span>Rank</span><strong id="statusRank">E</strong></div>
+                        <div><span>TXP</span><strong id="statusTxp">0 / 120</strong></div>
+                        <div><span>Energy</span><strong id="statusEnergy">100%</strong></div>
+                        <div><span>Focus</span><strong id="statusFocus">100%</strong></div>
+                        <div><span>HP</span><strong id="statusHp">100%</strong></div>
+                    </div>
+                </article>
+                <article class="card focus-card">
+                    <div class="card-head"><h3>Focus Mode</h3><span id="focusState" class="tag">Idle</span></div>
+                    <div id="focusTimerReadout" class="timer-readout">25:00</div>
+                    <div class="task-actions">
+                        <button id="focusStartBtn" class="primary-btn" type="button">Start</button>
+                        <button id="focusStopBtn" class="ghost-btn" type="button">Stop</button>
+                    </div>
+                    <p class="safe-note">Deep work boosts TXP gain and quiets distractions.</p>
+                </article>
                 <article class="card now-card glow-animate">
                     <p class="section-kicker">What should I do now?</p>
                     <h3 id="nowTaskTitle">System loading</h3>
@@ -144,6 +174,12 @@
                         <button class="quick-btn danger" data-quick="waste">Wasted time -20 TXP</button>
                     </div>
                 </article>
+                <article class="card streak-card">
+                    <div class="card-head"><h3>Daily Streak</h3><button class="small-btn nav-item-link" data-screen-target="streak">Open</button></div>
+                    <div class="streak-display"><strong id="dashStreak">0</strong><span>days active</span></div>
+                    <div id="dashWeekStreak" class="week-streak"></div>
+                    <p id="streakWarning" class="safe-note">Complete one goal today to protect the streak.</p>
+                </article>
                 <article class="card">
                     <div class="card-head"><h3>Reel Insights</h3></div>
                     <div id="latestReelAnalysis" class="analysis-panel"></div>
@@ -152,7 +188,63 @@
                     <div class="card-head"><h3>Habit Intelligence</h3></div>
                     <div id="habitInsights" class="stack-list"></div>
                 </article>
+                <article class="card span-two">
+                    <div class="card-head"><h3>Personal Profile</h3><button class="small-btn nav-item-link" data-screen-target="settings">Edit</button></div>
+                    <div id="personalProfileSummary" class="profile-summary-grid"></div>
+                </article>
+                <article class="card">
+                    <div class="card-head"><h3>Quick Notes</h3><span class="tag">Reflection</span></div>
+                    <form id="quickNoteForm" class="quick-note-form">
+                        <input id="quickNoteText" placeholder="Capture one thought">
+                        <select id="quickNoteCategory"><option>Reflection</option><option>Study</option><option>Fitness</option><option>Idea</option></select>
+                        <button class="primary-btn" type="submit">Save</button>
+                    </form>
+                    <div id="quickNotesList" class="stack-list"></div>
+                </article>
             </div>
+        </section>
+
+        <section id="screen-goals" class="screen">
+            <article class="card">
+                <div class="card-head"><h3>Goal System</h3><button id="goalsOpenModalBtn" class="primary-btn" type="button">Open Quest Popup</button></div>
+                <div id="goalsPageList" class="goal-list"></div>
+            </article>
+        </section>
+
+        <section id="screen-streak" class="screen">
+            <div class="grid two-col">
+                <article class="card">
+                    <div class="card-head"><h3>Daily Streak</h3><span class="tag">Consistency</span></div>
+                    <div class="streak-display large"><strong id="streakCurrent">0</strong><span>current streak</span></div>
+                    <div id="streakCalendar" class="week-streak large"></div>
+                    <p id="streakPanelWarning" class="penalty-warning">Missed daily goals can reset your streak momentum.</p>
+                </article>
+                <article class="card">
+                    <div class="card-head"><h3>Streak Stats</h3></div>
+                    <div class="status-grid">
+                        <div><span>Best Streak</span><strong id="bestStreak">0</strong></div>
+                        <div><span>Today Goals</span><strong id="streakGoalCount">0/0</strong></div>
+                        <div><span>Streak Bonus</span><strong id="streakBonus">0 TXP</strong></div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section id="screen-focus" class="screen">
+            <article class="card focus-config-card">
+                <div class="card-head"><h3>Timer System</h3><span id="focusStageBadge" class="tag">Seedling</span></div>
+                <div class="form-grid">
+                    <label>Mode<select id="timerMode"><option value="focus">Focus Timer</option><option value="pomodoro">Pomodoro Timer</option><option value="deep">Deep Work Timer</option><option value="custom">Custom Timer</option></select></label>
+                    <label>Minutes<input id="timerMinutes" type="number" min="1" max="240" value="25"></label>
+                    <label>Hours<input id="timerHours" type="number" min="0" max="6" value="0"></label>
+                    <label class="check-row"><input id="natureSoundToggle" type="checkbox"> Nature sound</label>
+                </div>
+                <div class="task-actions">
+                    <button id="openFocusModalBtn" class="primary-btn" type="button">Open Focus Mode</button>
+                    <button id="timerResetBtn" class="ghost-btn" type="button">Reset Timer</button>
+                </div>
+                <p class="safe-note">Timer rewards TXP by duration and saves focus sessions.</p>
+            </article>
         </section>
 
         <section id="screen-daily" class="screen">
@@ -364,18 +456,29 @@
         </section>
 
         <section id="screen-reels" class="screen">
-            <div class="grid two-col">
-                <form id="reelForm" class="card">
-                    <div class="card-head"><h3>Safe Reel / Content Analysis</h3><span class="tag">No scraping</span></div>
-                    <p class="safe-note">Paste public/manual inputs only: link, caption, notes, transcript, or a screenshot filename. KAALIX does not scrape private content.</p>
-                    <label>Reel link<input id="reelLink" placeholder="https://..."></label>
-                    <label>Title<input id="reelTitle" placeholder="How to read faster"></label>
-                    <label>Caption<textarea id="reelCaption" rows="3"></textarea></label>
-                    <label>Transcript<textarea id="reelTranscript" rows="3"></textarea></label>
-                    <label>Notes<textarea id="reelNotes" rows="3"></textarea></label>
-                    <label class="upload-zone">Screenshot input<input id="reelScreenshot" type="file" accept="image/*" class="hidden"><p id="screenshotName">No screenshot selected</p></label>
+            <div class="grid two-col reels-workspace">
+                <form id="reelForm" class="card reel-flow-card">
+                    <div class="card-head"><h3>Safe Reel / Content Analysis</h3><span class="tag">Public links only</span></div>
+                    <p class="safe-note">Choose a platform, paste a public link, then analyze. KAALIX never asks for passwords and never downloads private content.</p>
+                    <div id="reelPlatformGrid" class="platform-grid">
+                        <button type="button" class="platform-card active" data-platform="Instagram">Instagram</button>
+                        <button type="button" class="platform-card" data-platform="YouTube">YouTube</button>
+                        <button type="button" class="platform-card" data-platform="Pinterest">Pinterest</button>
+                        <button type="button" class="platform-card" data-platform="Other Website">Other Website</button>
+                    </div>
+                    <input id="reelPlatform" type="hidden" value="Instagram">
+                    <label>Public URL<input id="reelLink" placeholder="https://..." required></label>
+                    <div id="reelFallbackFields" class="fallback-fields hidden">
+                        <p class="safe-note">Automatic analysis needs public metadata/API access. Paste caption or notes if the link cannot be read.</p>
+                        <label>Title<input id="reelTitle" placeholder="Optional title"></label>
+                        <label>Caption<textarea id="reelCaption" rows="3" placeholder="Paste caption if needed"></textarea></label>
+                        <label>Notes<textarea id="reelNotes" rows="3" placeholder="What did you learn?"></textarea></label>
+                    </div>
                     <label class="check-row"><input id="autoAddToTimetable" type="checkbox" checked> Auto suggest useful timetable habit</label>
-                    <button id="analyzeBtn" class="primary-btn">Analyze Reel</button>
+                    <div class="button-row">
+                        <button id="analyzeBtn" class="primary-btn">Analyze Link</button>
+                        <button id="reelFallbackToggle" class="ghost-btn" type="button">Add Caption / Notes</button>
+                    </div>
                 </form>
                 <article class="card">
                     <div class="card-head"><h3>Latest Analysis</h3></div>
@@ -383,42 +486,147 @@
                 </article>
             </div>
             <article class="card">
-                <div class="card-head"><h3>Reel Library</h3></div>
+                <div class="card-head"><h3>Reel Library</h3><span class="tag">Saved to DB</span></div>
                 <div id="reelLibrary" class="stack-list"></div>
             </article>
         </section>
 
-        <section id="screen-wardrobe" class="screen">
-            <div class="grid two-col">
-                <form id="styleForm" class="card">
-                    <div class="card-head"><h3>AI Virtual Wardrobe</h3><span class="tag">Placeholder ML</span></div>
-                    <p class="safe-note">This version stores outfit logs and tags locally. Item detection/background removal are represented as placeholder workflow slots.</p>
-                    <label>Outfit / clothing items<textarea id="outfitDetails" rows="3" placeholder="Black jacket, white tee, boots"></textarea></label>
-                    <label>Occasion<input id="outfitOccasion" placeholder="College, interview, casual"></label>
-                    <label>Rating<input id="outfitRating" type="number" min="1" max="5" value="4"></label>
-                    <label>Tags / notes<textarea id="outfitNotes" rows="3" placeholder="Clean, dark, confident"></textarea></label>
-                    <button class="primary-btn">Save Outfit</button>
-                </form>
-                <article class="card">
-                    <div class="card-head"><h3>Saved Outfits</h3></div>
-                    <div id="styleList" class="stack-list"></div>
-                </article>
+        <section id="screen-wardrobe" class="screen wardrobe-screen">
+            <div class="wardrobe-page-head">
+                <div>
+                    <p class="eyebrow">AI Style Engine</p>
+                    <h2>VIRTUAL <span>WARDROBE</span></h2>
+                    <p>Upload your clothes and let AI create perfect combos for you.</p>
+                </div>
+                <div class="wardrobe-actions">
+                    <button id="wardrobeUploadTopBtn" class="primary-btn" type="button">Upload Item</button>
+                    <button id="wardrobeFilterBtn" class="ghost-btn" type="button">Filters</button>
+                    <button id="wardrobeMoreBtn" class="icon-btn" type="button">...</button>
+                </div>
+            </div>
+
+            <div id="wardrobeFilterPanel" class="wardrobe-filter-panel hidden">
+                <label>Category<select id="wardrobeFilterCategory"><option>All Items</option><option>Shirts</option><option>T-shirts</option><option>Pants</option><option>Jeans</option><option>Shoes</option><option>Watches</option><option>Accessories</option><option>Jackets</option><option>Hoodies</option><option>Others</option></select></label>
+                <label>Color<input id="wardrobeFilterColor" placeholder="Black, White, Blue"></label>
+                <label>Occasion<input id="wardrobeFilterOccasion" placeholder="Casual, College"></label>
+                <label>Season<select id="wardrobeFilterSeason"><option value="">Any Season</option><option>All Season</option><option>Summer</option><option>Winter</option><option>Rainy</option></select></label>
+                <label>Min Rating<input id="wardrobeFilterRating" type="number" min="1" max="5" placeholder="4"></label>
+                <label class="check-row"><input id="wardrobeFilterFavorite" type="checkbox"> Favorites only</label>
+                <button id="wardrobeApplyFiltersBtn" class="primary-btn" type="button">Apply</button>
+                <button id="wardrobeClearFiltersBtn" class="ghost-btn" type="button">Clear</button>
+            </div>
+
+            <div class="wardrobe-shell">
+                <div class="wardrobe-main">
+                    <article class="wardrobe-panel">
+                        <div id="wardrobeTabs" class="wardrobe-tabs"></div>
+                        <div id="wardrobeCounts" class="wardrobe-count-grid"></div>
+                        <div class="wardrobe-section-head">
+                            <h3 id="wardrobeGridTitle">All Items</h3>
+                            <div class="wardrobe-view-tools">
+                                <input id="wardrobeSearch" placeholder="Search wardrobe">
+                                <button id="wardrobeGridViewBtn" class="icon-btn active" type="button">▦</button>
+                                <button id="wardrobeListViewBtn" class="icon-btn" type="button">☰</button>
+                            </div>
+                        </div>
+                        <div id="wardrobeGrid" class="wardrobe-grid"></div>
+                        <button id="wardrobeLoadMoreBtn" class="ghost-btn center-btn" type="button">Load More</button>
+                    </article>
+
+                    <div class="wardrobe-bottom-grid">
+                        <article class="wardrobe-panel">
+                            <div class="card-head"><h3>Upload New Item</h3><span class="tag">JPG PNG WebP</span></div>
+                            <div id="wardrobeDropzone" class="wardrobe-dropzone">
+                                <input id="wardrobeFileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+                                <div class="drop-icon">⇧</div>
+                                <strong>Drag & drop your image here</strong>
+                                <p>or click to browse. Max 5MB per image.</p>
+                                <button id="wardrobeBrowseBtn" class="ghost-btn" type="button">Browse Files</button>
+                            </div>
+                            <div id="wardrobeUploadPreview" class="upload-meta">No wardrobe file selected.</div>
+                        </article>
+
+                        <form id="wardrobeItemForm" class="wardrobe-panel">
+                            <div class="card-head"><h3>Item Details</h3><span id="wardrobeFormMode" class="tag">New Item</span></div>
+                            <input id="wardrobeItemId" type="hidden">
+                            <div class="form-grid">
+                                <label>Category<select id="wardrobeCategory"><option value="">Auto detect</option><option>Shirts</option><option>T-shirts</option><option>Pants</option><option>Jeans</option><option>Shoes</option><option>Watches</option><option>Accessories</option><option>Jackets</option><option>Hoodies</option><option>Others</option></select></label>
+                                <label>Type / Name<input id="wardrobeName" placeholder="e.g. Black Shirt"></label>
+                                <label>Color<input id="wardrobeColor" placeholder="e.g. Black"></label>
+                                <label>Season<select id="wardrobeSeason"><option>All Season</option><option>Summer</option><option>Winter</option><option>Rainy</option></select></label>
+                                <label>Occasion<select id="wardrobeOccasion"><option>Casual</option><option>College</option><option>Gym</option><option>Formal</option><option>Date</option><option>Travel</option></select></label>
+                                <label>Rating<input id="wardrobeRating" type="number" min="1" max="5" value="4"></label>
+                            </div>
+                            <label>Tags / Notes<textarea id="wardrobeNotes" rows="3" placeholder="Clean, dark, confident"></textarea></label>
+                            <label class="check-row"><input id="wardrobeFavorite" type="checkbox"> Favorite item</label>
+                            <div class="button-row">
+                                <button class="primary-btn" type="submit">Save Item</button>
+                                <button id="wardrobeCancelEditBtn" class="ghost-btn" type="button">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <aside class="wardrobe-side">
+                    <article class="wardrobe-panel combo-panel">
+                        <div class="card-head">
+                            <h3>AI Outfit Combos</h3>
+                            <button id="wardrobeViewAllCombosBtn" class="link-btn" type="button">View All</button>
+                        </div>
+                        <div id="wardrobeCombos" class="combo-list"></div>
+                        <button id="wardrobeGenerateCombosBtn" class="primary-btn full-btn" type="button">Generate More Combos</button>
+                    </article>
+
+                    <article class="wardrobe-panel">
+                        <div class="card-head">
+                            <h3>Recently Added</h3>
+                            <button id="wardrobeViewAllRecentBtn" class="link-btn" type="button">View All</button>
+                        </div>
+                        <div id="recentWardrobeItems" class="recent-wardrobe-grid"></div>
+                    </article>
+                </aside>
             </div>
         </section>
 
         <section id="screen-friends" class="screen">
-            <div class="grid two-col">
-                <form id="socialForm" class="card">
-                    <div class="card-head"><h3>Friend / Social Tracker</h3></div>
-                    <label>Person<input id="socialPerson" placeholder="Name"></label>
-                    <label>Place<input id="socialPlace" placeholder="College, gym, online"></label>
-                    <label>Impact<select id="socialImpact"><option>Positive</option><option>Neutral</option><option>Negative</option></select></label>
-                    <label>Lesson<textarea id="socialLesson" rows="3"></textarea></label>
-                    <button class="primary-btn">Log Interaction</button>
+            <div class="friends-workspace">
+                <form id="socialForm" class="card friend-form-card">
+                    <div class="card-head"><h3>Friend / Social Tracker</h3><span class="tag">Relationship XP</span></div>
+                    <input id="friendId" type="hidden">
+                    <input id="friendPhotoUrl" type="hidden">
+                    <div class="friend-form-layout">
+                        <div class="friend-photo-panel">
+                            <span>Photo</span>
+                            <label class="friend-photo-uploader">
+                                <input id="friendPhotoInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                                <img id="friendPhotoPreview" src="/assets/kaalix-logo.png" alt="Friend avatar preview">
+                                <em>Change photo</em>
+                            </label>
+                        </div>
+                        <div class="friend-fields">
+                            <p class="section-kicker">Person Details</p>
+                            <label>Name <span class="required">*</span><input id="socialPerson" placeholder="Aman Verma" required></label>
+                            <label>Contact Number</label>
+                            <div class="phone-row">
+                                <select id="friendCountryCode"><option>+91</option><option>+1</option><option>+44</option><option>+971</option><option>+61</option></select>
+                                <input id="friendContact" placeholder="98765 43210">
+                            </div>
+                            <label>Place<input id="socialPlace" placeholder="Delhi, India"></label>
+                            <label>Impact<select id="socialImpact"><option>Positive</option><option>Neutral</option><option>Negative</option></select></label>
+                            <label>Lesson Learned / How they inspire you<textarea id="socialLesson" rows="3" placeholder="They are consistent and help me stay motivated."></textarea></label>
+                            <label>Enhance Lesson (What will you improve from this)<textarea id="friendEnhancedLesson" rows="3" placeholder="I will improve my consistency and be more helpful to others."></textarea></label>
+                            <label>Tags<input id="friendTags" placeholder="Consistency, Discipline"></label>
+                            <div class="button-row">
+                                <button class="primary-btn">Save Friend</button>
+                                <button id="friendClearBtn" class="ghost-btn" type="button">Clear Form</button>
+                            </div>
+                        </div>
+                    </div>
                 </form>
-                <article class="card">
-                    <div class="card-head"><h3>Interaction History</h3></div>
+                <article class="card friend-history-card">
+                    <div class="card-head"><h3>Interaction History</h3><button id="friendExportBtn" class="ghost-btn" type="button">Export History</button></div>
                     <div id="socialList" class="stack-list"></div>
+                    <p id="friendTotalCount" class="friend-total">Total Interactions: 0</p>
                 </article>
             </div>
         </section>
@@ -430,6 +638,39 @@
             </article>
         </section>
 
+        <section id="screen-analytics" class="screen">
+            <div class="grid four-col">
+                <article class="card metric-card"><p>Total TXP</p><h3 id="analyticsTotalTxp">0</h3></article>
+                <article class="card metric-card"><p>Productivity</p><h3 id="analyticsProductivity">0%</h3></article>
+                <article class="card metric-card"><p>Tasks Done</p><h3 id="analyticsTasksDone">0</h3></article>
+                <article class="card metric-card"><p>Focus Sessions</p><h3 id="analyticsFocusSessions">0</h3></article>
+            </div>
+            <article class="card">
+                <div class="card-head"><h3>Attributes</h3></div>
+                <div id="analyticsStatsGrid" class="stats-grid"></div>
+            </article>
+        </section>
+
+        <section id="screen-notes" class="screen">
+            <div class="grid two-col">
+                <form id="notesForm" class="card">
+                    <div class="card-head"><h3>Notes</h3><span class="tag">Study / Ideas / Reflection</span></div>
+                    <input id="noteSearch" placeholder="Search notes">
+                    <label>Category<select id="noteCategory"><option>Study</option><option>DSA</option><option>Project</option><option>Personal</option><option>Reflection</option><option>Tasks</option></select></label>
+                    <label>Note<textarea id="noteText" rows="5" placeholder="Write a clean thought, task, or reflection"></textarea></label>
+                    <input id="editingNoteId" type="hidden">
+                    <div class="task-actions">
+                        <button class="primary-btn" type="submit">Save Note</button>
+                        <button id="cancelNoteEditBtn" class="ghost-btn" type="button">Cancel Edit</button>
+                    </div>
+                </form>
+                <article class="card">
+                    <div class="card-head"><h3>Saved Notes</h3><span id="notesCount" class="tag">0</span></div>
+                    <div id="notesList" class="stack-list"></div>
+                </article>
+            </div>
+        </section>
+
         <section id="screen-settings" class="screen">
             <form id="profileForm" class="card">
                 <div class="card-head"><h3>Settings & Mission</h3></div>
@@ -438,6 +679,11 @@
                     <label>Username<input id="profileUsername" autocomplete="username"></label>
                     <label>Email<input id="profileEmail" type="email" autocomplete="email"></label>
                     <label>Title<input id="profileTitleInput"></label>
+                    <label>Body type<input id="bodyType" placeholder="Lean, athletic, etc."></label>
+                    <label>Weight / fitness stats<input id="fitnessStats" placeholder="70kg, cutting, strength focus"></label>
+                    <label>Relationship status<input id="relationshipStatus" placeholder="Single, committed, private"></label>
+                    <label>Lifestyle habits<input id="lifestyleHabits" placeholder="Sleep, diet, training patterns"></label>
+                    <label>Custom attributes<input id="customAttributes" placeholder="Calm, sharp, disciplined"></label>
                     <label>Planned wake<input id="plannedWakeTime" type="time"></label>
                     <label>Planned sleep<input id="plannedSleepTime" type="time"></label>
                 </div>
@@ -513,6 +759,55 @@
 
 <div id="toast" class="toast"></div>
 <div id="kaalixCursor" class="kaalix-cursor"></div>
+<div id="goalModal" class="goal-modal hidden" role="dialog" aria-modal="true" aria-labelledby="goalModalTitle">
+    <article class="card goal-card">
+        <div class="card-head">
+            <div><p class="eyebrow">DAILY QUEST</p><h3 id="goalModalTitle">Goal System</h3></div>
+            <button id="goalCloseBtn" class="icon-btn icon-action" type="button" title="Close"></button>
+        </div>
+        <div id="goalQuestList" class="goal-list"></div>
+        <p class="penalty-warning">Penalty warning: unfinished high-priority quests reduce rank momentum and TXP gain tomorrow.</p>
+    </article>
+</div>
+<div id="focusModal" class="focus-modal hidden" role="dialog" aria-modal="true" aria-labelledby="focusModalTitle">
+    <article class="focus-modal-card">
+        <div class="focus-modal-top">
+            <span id="focusModalMode" class="tag">Focus Timer</span>
+            <button id="exitFocusModalBtn" class="ghost-btn" type="button">Exit Focus Mode X</button>
+        </div>
+        <h2 id="focusModalTitle">FOCUS MODE</h2>
+        <p>You grow when you focus. Distractions fade, progress stays.</p>
+        <div class="focus-modal-body">
+            <div class="focus-stage">
+                <span>CURRENT STAGE</span>
+                <strong id="focusPlantStage">Seedling</strong>
+                <small id="focusPlantHint">Stay focused and help your plant grow.</small>
+            </div>
+            <div class="timer-ring" style="--timer-progress:0">
+                <svg viewBox="0 0 220 220" aria-hidden="true">
+                    <circle cx="110" cy="110" r="94"></circle>
+                    <circle id="timerProgressCircle" class="timer-ring-progress" cx="110" cy="110" r="94"></circle>
+                </svg>
+                <div class="timer-ring-center">
+                    <strong id="focusModalTime">25:00</strong>
+                    <span id="focusModalSession">Deep Work Session</span>
+                </div>
+            </div>
+            <div class="focus-stage">
+                <span>PROGRESS</span>
+                <strong id="focusProgressPercent">0%</strong>
+                <small id="focusProgressHint">Your plant is waiting.</small>
+            </div>
+        </div>
+        <div class="plant-scene"><div id="plantVisual" class="plant-visual stage-seedling"></div></div>
+        <div class="focus-modal-actions">
+            <button id="timerStartPauseBtn" class="primary-btn" type="button">Start</button>
+            <button id="timerStopBtn" class="ghost-btn" type="button">Stop Session</button>
+            <button id="timerModalResetBtn" class="ghost-btn" type="button">Reset</button>
+            <button id="natureSoundBtn" class="ghost-btn" type="button">Nature Sounds Off</button>
+        </div>
+    </article>
+</div>
 <audio id="loginSound" preload="auto" src="/assets/login-arise.mp3"></audio>
 <audio id="taskSound" preload="auto" src="/assets/task-complete.mp3"></audio>
 <audio id="studySound" preload="auto" loop src="/assets/study-mode.mp3"></audio>

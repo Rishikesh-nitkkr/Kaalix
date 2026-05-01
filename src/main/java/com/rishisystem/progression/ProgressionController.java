@@ -24,6 +24,11 @@ public class ProgressionController {
         return progressionService.submitDailyLog(request);
     }
 
+    @PostMapping({"/reward-txp", "/api/reward-txp"})
+    public UserStatusResponse rewardTxp(@Valid @RequestBody RewardTxpRequest request) {
+        return progressionService.rewardTxp(request);
+    }
+
     @GetMapping({"/user-status", "/api/user-status"})
     public UserStatusResponse userStatus(@RequestParam @NotBlank String userKey) {
         return progressionService.getUserStatus(userKey);

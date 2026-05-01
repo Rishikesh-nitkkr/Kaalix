@@ -36,6 +36,8 @@ public class DailyLog {
     private int totalTasks;
     private int score;
     private int txpEarned;
+    private int dailyTxp;
+    private String actionsData;
 
     public Long getId() {
         return id;
@@ -159,5 +161,21 @@ public class DailyLog {
 
     public void setTxpEarned(int txpEarned) {
         this.txpEarned = txpEarned;
+    }
+
+    public int getDailyTxp() {
+        return dailyTxp;
+    }
+
+    public void setDailyTxp(int dailyTxp) {
+        this.dailyTxp = dailyTxp;
+    }
+
+    public String getActionsData() {
+        return actionsData;
+    }
+
+    public void setActionsData(String actionsData) {
+        this.actionsData = actionsData;
     }
 }

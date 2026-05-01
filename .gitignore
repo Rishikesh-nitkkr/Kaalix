@@ -1,0 +1,14 @@
+target/
+.m2repo/
+.vscode/
+*.jar
+*.zip
+*.log
+.DS_Store
+target/
+.m2repo/
+.vscode/
+android-wrapper/
+*.jar
+*.zip
+*.log

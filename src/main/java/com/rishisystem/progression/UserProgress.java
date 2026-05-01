@@ -31,8 +31,14 @@ public class UserProgress {
     @Column(nullable = false)
     private int txp = 0;
 
+    @Column(name = "total_txp", nullable = false)
+    private int totalTxp = 0;
+
+    @Column(name = "daily_txp", nullable = false)
+    private int dailyTxp = 0;
+
     @Column(nullable = false)
-    private int nextLevelXp = 120;
+    private int nextLevelXp = 127;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -80,6 +86,22 @@ public class UserProgress {
 
     public void setTxp(int txp) {
         this.txp = txp;
+    }
+
+    public int getTotalTxp() {
+        return totalTxp;
+    }
+
+    public void setTotalTxp(int totalTxp) {
+        this.totalTxp = totalTxp;
+    }
+
+    public int getDailyTxp() {
+        return dailyTxp;
+    }
+
+    public void setDailyTxp(int dailyTxp) {
+        this.dailyTxp = dailyTxp;
     }
 
     public int getNextLevelXp() {

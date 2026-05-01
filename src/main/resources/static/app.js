@@ -15,6 +15,8 @@ const QUOTES = [
     "You are not behind. You are being forged.",
     "Control the day before the day controls you."
 ];
+const WARDROBE_CATEGORIES = ["All Items", "Shirts", "T-shirts", "Pants", "Jeans", "Shoes", "Watches", "Accessories", "Jackets", "Hoodies", "Others"];
+const WARDROBE_COUNT_CATEGORIES = ["Shirts", "Pants", "Shoes", "Accessories", "Watches", "Jackets"];
 const DEFAULT_MUSIC_QUEUE = [
     {
         id: "statue-god-theme",
@@ -83,6 +85,10 @@ let importedFile = null;
 let importedConfirmed = false;
 let uiState = loadUiState();
 let runtimeMusicUrls = [];
+let focusTimer = null;
+let focusRemainingSeconds = 25 * 60;
+let focusTotalSeconds = 25 * 60;
+let focusStartedAt = null;
 const EMPTY_DAILY_LOG = {
     wakeTime: "",
     sleepTime: "",
@@ -216,6 +222,11 @@ function bindForms() {
         state.profile.username = username;
         state.profile.email = email;
         state.profile.title = document.getElementById("profileTitleInput").value.trim() || state.profile.title;
+        state.profile.bodyType = document.getElementById("bodyType").value.trim();
+        state.profile.fitnessStats = document.getElementById("fitnessStats").value.trim();
+        state.profile.relationshipStatus = document.getElementById("relationshipStatus").value.trim();
+        state.profile.lifestyleHabits = document.getElementById("lifestyleHabits").value.trim();
+        state.profile.customAttributes = document.getElementById("customAttributes").value.trim();
         state.profile.plannedWakeTime = document.getElementById("plannedWakeTime").value || state.profile.plannedWakeTime;
         state.profile.plannedSleepTime = document.getElementById("plannedSleepTime").value || state.profile.plannedSleepTime;
         state.profile.mission = document.getElementById("profileMission").value.trim() || state.profile.mission;
@@ -291,7 +302,13 @@ function bindForms() {
         showToast("Study session added.");
     });
 
-    document.getElementById("socialForm").addEventListener("submit", (event) => {
+    document.getElementById("socialForm").addEventListener("submit", saveFriendLog);
+    document.getElementById("friendPhotoInput")?.addEventListener("change", uploadFriendPhoto);
+    document.getElementById("friendClearBtn")?.addEventListener("click", clearFriendForm);
+    document.getElementById("friendExportBtn")?.addEventListener("click", exportFriendHistory);
+    document.getElementById("socialList")?.addEventListener("click", handleFriendAction);
+
+    document.getElementById("legacySocialForm")?.addEventListener("submit", (event) => {
         event.preventDefault();
         if (!state) {
             return;
@@ -309,7 +326,7 @@ function bindForms() {
         showToast("Social log saved.");
     });
 
-    document.getElementById("styleForm").addEventListener("submit", (event) => {
+    document.getElementById("styleForm")?.addEventListener("submit", (event) => {
         event.preventDefault();
         if (!state) {
             return;
@@ -328,9 +345,12 @@ function bindForms() {
         showToast("Outfit saved.");
     });
 
-    document.getElementById("reelScreenshot").addEventListener("change", (event) => {
+    document.getElementById("reelPlatformGrid")?.addEventListener("click", handleReelPlatformSelect);
+    document.getElementById("reelFallbackToggle")?.addEventListener("click", () => document.getElementById("reelFallbackFields")?.classList.toggle("hidden"));
+    document.getElementById("reelScreenshot")?.addEventListener("change", (event) => {
         const file = event.target.files?.[0];
-        document.getElementById("screenshotName").textContent = file ? file.name : "No screenshot selected";
+        const label = document.getElementById("screenshotName");
+        if (label) label.textContent = file ? file.name : "No screenshot selected";
     });
 
     document.getElementById("reelForm").addEventListener("submit", async (event) => {
@@ -339,15 +359,18 @@ function bindForms() {
             return;
         }
         const payload = {
+            userId: currentUser?.email || "local",
+            platform: document.getElementById("reelPlatform")?.value || "Instagram",
+            url: document.getElementById("reelLink").value.trim(),
             link: document.getElementById("reelLink").value.trim(),
             title: document.getElementById("reelTitle").value.trim(),
             caption: document.getElementById("reelCaption").value.trim(),
-            transcript: document.getElementById("reelTranscript").value.trim(),
+            transcript: document.getElementById("reelTranscript")?.value.trim() || "",
             notes: document.getElementById("reelNotes").value.trim(),
-            screenshotName: document.getElementById("screenshotName").textContent === "No screenshot selected" ? "" : document.getElementById("screenshotName").textContent
+            screenshotName: document.getElementById("screenshotName")?.textContent === "No screenshot selected" ? "" : document.getElementById("screenshotName")?.textContent
         };
-        if (!payload.link && !payload.title && !payload.caption && !payload.transcript && !payload.notes) {
-            showToast("Add at least one reel detail first.");
+        if (!payload.url) {
+            showToast("Paste a public link first.");
             return;
         }
         setAnalyzeButton(true);
@@ -358,11 +381,12 @@ function bindForms() {
             addInsightTask(reelEntry, true);
         }
         event.target.reset();
+        document.getElementById("reelPlatform").value = payload.platform;
         document.getElementById("autoAddToTimetable").checked = true;
-        document.getElementById("screenshotName").textContent = "No screenshot selected";
+        if (document.getElementById("screenshotName")) document.getElementById("screenshotName").textContent = "No screenshot selected";
         setAnalyzeButton(false);
         persistState();
-        showToast("Reel analyzed and saved.");
+        showToast("Link analyzed and saved.");
     });
 }
 
@@ -410,22 +434,53 @@ function bindInteractions() {
             return;
         }
         task.status = button.dataset.taskAction;
-        if (button.dataset.taskAction === "done") {
+        if (button.dataset.taskAction === "done" && !task.rewarded) {
+            task.rewarded = true;
             playSound("task");
+            await rewardTXP(taskRewardAmount(task), `Task completed: ${task.title}`);
+            return;
+        }
+        if (button.dataset.taskAction !== "done") {
+            task.rewarded = false;
         }
         persistState();
         await syncDailyProgression();
     });
 
+    document.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-start-task-timer]");
+        if (!button || !state) return;
+        const task = state.timetable.find((item) => item.id === button.dataset.startTaskTimer);
+        if (task) {
+            document.getElementById("timerMode").value = /study|dsa|coding/i.test(task.category + task.title) ? "deep" : "focus";
+            document.getElementById("timerHours").value = "0";
+            document.getElementById("timerMinutes").value = task.priority === "HIGH" ? "50" : "25";
+            configureTimerFromInputs();
+            openFocusModal();
+        }
+    });
+
+    document.getElementById("goalQuestList")?.addEventListener("change", async (event) => {
+        await handleGoalToggle(event);
+    });
+    document.getElementById("goalsPageList")?.addEventListener("change", handleGoalToggle);
+
     document.getElementById("reelLibrary").addEventListener("click", (event) => {
-        const button = event.target.closest("[data-reel-action='add']");
+        const button = event.target.closest("[data-reel-action]");
         if (!button || !state) {
             return;
         }
         const reel = state.reels.find((item) => item.id === button.dataset.reelId);
-        if (reel) {
+        if (!reel) return;
+        if (button.dataset.reelAction === "add") {
             addInsightTask(reel, false);
             persistState();
+        }
+        if (button.dataset.reelAction === "delete") {
+            state.reels = state.reels.filter((item) => String(item.id) !== String(reel.id));
+            fetch(`/api/reels/${reel.id}`, { method: "DELETE" }).catch(() => {});
+            persistState();
+            showToast("Reel insight deleted.");
         }
     });
 
@@ -460,6 +515,211 @@ function bindInteractions() {
         switchScreen("dashboard");
         showToast("Tomorrow timetable applied.");
     });
+}
+
+function openGoalModal() {
+    renderGoalSystem();
+    document.getElementById("goalModal")?.classList.remove("hidden");
+}
+
+function closeGoalModal() {
+    document.getElementById("goalModal")?.classList.add("hidden");
+}
+
+async function handleGoalToggle(event) {
+    const input = event.target.closest("[data-goal-task]");
+    if (!input || !state) {
+        return;
+    }
+    const task = state.timetable.find((item) => item.id === input.dataset.goalTask);
+    if (!task) {
+        return;
+    }
+    const wasDone = task.status === "done";
+    task.status = input.checked ? "done" : "pending";
+    if (input.checked && !wasDone && !task.rewarded) {
+        task.rewarded = true;
+        playSound("task");
+        await rewardTXP(taskRewardAmount(task), `Goal completed: ${task.title}`);
+    } else {
+        persistState();
+        await syncDailyProgression();
+    }
+}
+
+function startFocusMode() {
+    configureTimerFromInputs();
+    uiState.focusModeActive = true;
+    focusStartedAt = Date.now();
+    focusRemainingSeconds = focusRemainingSeconds > 0 ? focusRemainingSeconds : focusTotalSeconds;
+    clearInterval(focusTimer);
+    focusTimer = setInterval(() => {
+        focusRemainingSeconds -= 1;
+        renderFocusTimer();
+        if (focusRemainingSeconds <= 0) {
+            completeFocusSession();
+        }
+    }, 1000);
+    saveUiState();
+    renderFocusTimer();
+    showToast("Focus mode started. Distractions down, TXP multiplier ready.");
+}
+
+function stopFocusMode() {
+    clearInterval(focusTimer);
+    focusTimer = null;
+    uiState.focusModeActive = false;
+    focusRemainingSeconds = focusTotalSeconds;
+    saveUiState();
+    renderFocusTimer();
+    showToast("Focus mode stopped.");
+}
+
+async function completeFocusSession() {
+    clearInterval(focusTimer);
+    focusTimer = null;
+    uiState.focusModeActive = false;
+    focusRemainingSeconds = 25 * 60;
+    const completedMinutes = Math.max(1, Math.round((focusTotalSeconds || 1500) / 60));
+    const txpReward = calculateTimerReward(completedMinutes);
+    state.focusSessions.unshift({ id: uid(), minutes: completedMinutes, mode: document.getElementById("timerMode")?.value || "focus", txp: txpReward, createdAt: new Date().toISOString() });
+    state.dailyLog.studyHours = Number(state.dailyLog.studyHours || 0) + completedMinutes / 60;
+    state.dailyLog.positiveActions = unique([...splitEntries(state.dailyLog.positiveActions), "Completed deep focus block"]).join(", ");
+    saveUiState();
+    persistState();
+    await rewardTXP(txpReward, "Focus session completed");
+    playSound("task");
+    showToast("Focus block completed. TXP updated.");
+}
+
+function saveQuickNote(event) {
+    event.preventDefault();
+    if (!state) {
+        return;
+    }
+    const text = document.getElementById("quickNoteText").value.trim();
+    if (!text) {
+        showToast("Write a note first.");
+        return;
+    }
+    state.notes.unshift({
+        id: uid(),
+        text,
+        category: document.getElementById("quickNoteCategory").value,
+        createdAt: new Date().toISOString()
+    });
+    event.target.reset();
+    persistState();
+    showToast("Note saved.");
+}
+
+function saveFullNote(event) {
+    event.preventDefault();
+    if (!state) return;
+    const text = document.getElementById("noteText").value.trim();
+    if (!text) {
+        showToast("Write a note first.");
+        return;
+    }
+    const id = document.getElementById("editingNoteId").value;
+    const existing = state.notes.find((note) => note.id === id);
+    if (existing) {
+        existing.text = text;
+        existing.category = document.getElementById("noteCategory").value;
+        existing.updatedAt = new Date().toISOString();
+    } else {
+        state.notes.unshift({ id: uid(), text, category: document.getElementById("noteCategory").value, pinned: false, createdAt: new Date().toISOString() });
+    }
+    clearNoteEditor();
+    persistState();
+    showToast("Note saved.");
+}
+
+function handleNoteAction(event) {
+    const button = event.target.closest("[data-note-action]");
+    if (!button || !state) return;
+    const note = state.notes.find((item) => item.id === button.dataset.noteId);
+    if (!note) return;
+    const action = button.dataset.noteAction;
+    if (action === "pin") {
+        note.pinned = !note.pinned;
+    }
+    if (action === "edit") {
+        document.getElementById("editingNoteId").value = note.id;
+        document.getElementById("noteText").value = note.text;
+        document.getElementById("noteCategory").value = note.category || "Reflection";
+    }
+    if (action === "delete") {
+        state.notes = state.notes.filter((item) => item.id !== note.id);
+    }
+    persistState();
+}
+
+function clearNoteEditor() {
+    const form = document.getElementById("notesForm");
+    if (form) form.reset();
+    const edit = document.getElementById("editingNoteId");
+    if (edit) edit.value = "";
+}
+
+function applyTimerModeDefaults() {
+    const mode = document.getElementById("timerMode")?.value || "focus";
+    const minutes = { focus: 25, pomodoro: 25, deep: 90, custom: Number(document.getElementById("timerMinutes")?.value || 25) }[mode] || 25;
+    document.getElementById("timerHours").value = mode === "deep" ? 1 : 0;
+    document.getElementById("timerMinutes").value = mode === "deep" ? 30 : minutes;
+    configureTimerFromInputs();
+}
+
+function configureTimerFromInputs() {
+    const hours = clampNumber(Number(document.getElementById("timerHours")?.value || 0), 0, 6);
+    const minutes = clampNumber(Number(document.getElementById("timerMinutes")?.value || 25), 1, 240);
+    focusTotalSeconds = Math.max(60, Math.round((hours * 60 + minutes) * 60));
+    if (!uiState.focusModeActive || focusRemainingSeconds <= 0) {
+        focusRemainingSeconds = focusTotalSeconds;
+    }
+    renderFocusTimer();
+}
+
+function openFocusModal() {
+    configureTimerFromInputs();
+    document.getElementById("focusModal")?.classList.remove("hidden");
+    renderFocusTimer();
+}
+
+function closeFocusModal() {
+    document.getElementById("focusModal")?.classList.add("hidden");
+}
+
+function toggleTimer() {
+    if (uiState.focusModeActive) {
+        clearInterval(focusTimer);
+        focusTimer = null;
+        uiState.focusModeActive = false;
+        saveUiState();
+        renderFocusTimer();
+        showToast("Timer paused.");
+        return;
+    }
+    startFocusMode();
+}
+
+function resetTimerConfig() {
+    clearInterval(focusTimer);
+    focusTimer = null;
+    uiState.focusModeActive = false;
+    configureTimerFromInputs();
+    saveUiState();
+    renderFocusTimer();
+    showToast("Timer reset.");
+}
+
+function toggleNatureSound() {
+    uiState.natureSound = !uiState.natureSound;
+    const toggle = document.getElementById("natureSoundToggle");
+    if (toggle) toggle.checked = Boolean(uiState.natureSound);
+    saveUiState();
+    renderFocusTimer();
+    showToast(uiState.natureSound ? "Nature sound enabled." : "Nature sound disabled.");
 }
 
 function bindSystemControls() {
@@ -506,6 +766,58 @@ function bindSystemControls() {
     document.getElementById("songImport").addEventListener("change", handleSongImport);
     document.getElementById("openSpotifyBtn").addEventListener("click", openSpotifyLink);
     document.getElementById("resetSystemBtn").addEventListener("click", resetSystemProgress);
+    document.getElementById("goalOpenBtn")?.addEventListener("click", openGoalModal);
+    document.getElementById("goalsOpenModalBtn")?.addEventListener("click", openGoalModal);
+    document.getElementById("goalCloseBtn")?.addEventListener("click", closeGoalModal);
+    document.getElementById("focusStartBtn")?.addEventListener("click", startFocusMode);
+    document.getElementById("focusStopBtn")?.addEventListener("click", stopFocusMode);
+    document.getElementById("quickNoteForm")?.addEventListener("submit", saveQuickNote);
+    document.getElementById("openFocusModalBtn")?.addEventListener("click", openFocusModal);
+    document.getElementById("exitFocusModalBtn")?.addEventListener("click", closeFocusModal);
+    document.getElementById("timerStartPauseBtn")?.addEventListener("click", toggleTimer);
+    document.getElementById("timerStopBtn")?.addEventListener("click", stopFocusMode);
+    document.getElementById("timerResetBtn")?.addEventListener("click", resetTimerConfig);
+    document.getElementById("timerModalResetBtn")?.addEventListener("click", resetTimerConfig);
+    document.getElementById("natureSoundBtn")?.addEventListener("click", toggleNatureSound);
+    document.getElementById("timerMode")?.addEventListener("change", applyTimerModeDefaults);
+    document.getElementById("wardrobeUploadTopBtn")?.addEventListener("click", () => document.getElementById("wardrobeFileInput")?.click());
+    document.getElementById("wardrobeBrowseBtn")?.addEventListener("click", () => document.getElementById("wardrobeFileInput")?.click());
+    document.getElementById("wardrobeDropzone")?.addEventListener("click", (event) => {
+        if (!event.target.closest("button")) {
+            document.getElementById("wardrobeFileInput")?.click();
+        }
+    });
+    document.getElementById("wardrobeDropzone")?.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        event.currentTarget.classList.add("dragging");
+    });
+    document.getElementById("wardrobeDropzone")?.addEventListener("dragleave", (event) => {
+        event.currentTarget.classList.remove("dragging");
+    });
+    document.getElementById("wardrobeDropzone")?.addEventListener("drop", handleWardrobeDrop);
+    document.getElementById("wardrobeFileInput")?.addEventListener("change", handleWardrobeFileSelect);
+    document.getElementById("wardrobeItemForm")?.addEventListener("submit", saveWardrobeItem);
+    document.getElementById("wardrobeCancelEditBtn")?.addEventListener("click", clearWardrobeEditor);
+    document.getElementById("wardrobeFilterBtn")?.addEventListener("click", () => document.getElementById("wardrobeFilterPanel")?.classList.toggle("hidden"));
+    document.getElementById("wardrobeApplyFiltersBtn")?.addEventListener("click", applyWardrobeFilters);
+    document.getElementById("wardrobeClearFiltersBtn")?.addEventListener("click", clearWardrobeFilters);
+    document.getElementById("wardrobeSearch")?.addEventListener("input", (event) => {
+        state.wardrobeFilters.search = event.target.value;
+        renderWardrobeModule();
+    });
+    document.getElementById("wardrobeGridViewBtn")?.addEventListener("click", () => setWardrobeView(false));
+    document.getElementById("wardrobeListViewBtn")?.addEventListener("click", () => setWardrobeView(true));
+    document.getElementById("wardrobeGenerateCombosBtn")?.addEventListener("click", generateWardrobeCombos);
+    document.getElementById("wardrobeTabs")?.addEventListener("click", handleWardrobeTab);
+    document.getElementById("wardrobeGrid")?.addEventListener("click", handleWardrobeCardAction);
+    document.getElementById("recentWardrobeItems")?.addEventListener("click", handleWardrobeCardAction);
+    document.getElementById("wardrobeCombos")?.addEventListener("click", handleWardrobeComboAction);
+    document.getElementById("timerMinutes")?.addEventListener("input", configureTimerFromInputs);
+    document.getElementById("timerHours")?.addEventListener("input", configureTimerFromInputs);
+    document.getElementById("notesForm")?.addEventListener("submit", saveFullNote);
+    document.getElementById("notesList")?.addEventListener("click", handleNoteAction);
+    document.getElementById("noteSearch")?.addEventListener("input", renderNotesScreen);
+    document.getElementById("cancelNoteEditBtn")?.addEventListener("click", clearNoteEditor);
     document.getElementById("musicMasterToggle")?.addEventListener("click", toggleMusicPlayback);
     document.getElementById("musicPlayBtn")?.addEventListener("click", toggleMusicPlayback);
     document.getElementById("miniPlayBtn")?.addEventListener("click", toggleMusicPlayback);
@@ -681,6 +993,7 @@ async function confirmImportedTimetable() {
             ...task,
             id: uid(),
             status: "pending",
+            rewarded: false,
             source: "confirmed-import"
         }));
         const wakeTask = state.timetable.find((task) => /wake/i.test(task.title));
@@ -716,7 +1029,12 @@ function createDefaultState(user) {
             plannedWakeTime: "06:00",
             plannedSleepTime: "22:30",
             avatar: "",
-            themePreference: "monarch"
+            themePreference: "monarch",
+            bodyType: "",
+            fitnessStats: "",
+            relationshipStatus: "",
+            lifestyleHabits: "",
+            customAttributes: ""
         },
         dailyLog: {
             ...EMPTY_DAILY_LOG
@@ -726,6 +1044,11 @@ function createDefaultState(user) {
         socialLogs: [],
         emotionLogs: [],
         wardrobeLogs: [],
+        wardrobeItems: [],
+        outfitCombos: [],
+        wardrobeFilters: { category: "All Items", color: "", occasion: "", season: "", favorite: false, rating: "", search: "", listView: false },
+        notes: [],
+        focusSessions: [],
         timetable: defaultTimetable(),
         report: null,
         lastDailyDate: todayKey(),
@@ -733,7 +1056,10 @@ function createDefaultState(user) {
             level: 1,
             rank: "E",
             txp: 0,
-            nextLevelXP: 120,
+            dailyTXP: 0,
+            totalTXP: 0,
+            nextLevelXP: 127,
+            nextLevelTXP: 127,
             streak: 0,
             score: 0,
             tier: "Beginner",
@@ -762,7 +1088,7 @@ function defaultTimetable() {
 }
 
 function createTask(time, title, priority, category, TXP, source) {
-    return { id: uid(), time, title, priority, category, xp: TXP, source, status: "pending" };
+    return { id: uid(), time, title, priority, category, xp: TXP, source, status: "pending", rewarded: false };
 }
 
 function persistState() {
@@ -815,6 +1141,11 @@ function normalizeState(parsed) {
     parsed.socialLogs = Array.isArray(parsed.socialLogs) ? parsed.socialLogs : [];
     parsed.emotionLogs = Array.isArray(parsed.emotionLogs) ? parsed.emotionLogs : [];
     parsed.wardrobeLogs = Array.isArray(parsed.wardrobeLogs) ? parsed.wardrobeLogs : [];
+    parsed.wardrobeItems = Array.isArray(parsed.wardrobeItems) ? parsed.wardrobeItems : [];
+    parsed.outfitCombos = Array.isArray(parsed.outfitCombos) ? parsed.outfitCombos : [];
+    parsed.wardrobeFilters = { ...defaults.wardrobeFilters, ...(parsed.wardrobeFilters || {}) };
+    parsed.notes = Array.isArray(parsed.notes) ? parsed.notes : [];
+    parsed.focusSessions = Array.isArray(parsed.focusSessions) ? parsed.focusSessions : [];
     parsed.importedWeek = parsed.importedWeek || null;
     parsed.importStatus = parsed.importStatus || "waiting";
     parsed.importedFileName = parsed.importedFileName || "";
@@ -827,7 +1158,8 @@ function normalizeState(parsed) {
         category: task.category || "Imported",
         xp: Number(task.xp ?? task.TXP ?? task.txp ?? 20),
         source: task.source || "local",
-        status: task.status || "pending"
+        status: task.status || "pending",
+        rewarded: Boolean(task.rewarded)
     }));
     return parsed;
 }
@@ -868,6 +1200,9 @@ function finishLogin() {
     populateForms();
     renderAll();
     loadMusicLibrary();
+    loadWardrobeLibrary();
+    loadFriends();
+    loadReels();
     if (uiState.musicEnabled) {
         playBackgroundMusic();
     }
@@ -890,9 +1225,12 @@ function switchScreen(screen) {
     document.querySelectorAll(".screen").forEach((section) => {
         section.classList.toggle("active", section.id === `screen-${screen}`);
     });
+    uiState.activeScreen = screen;
+    saveUiState();
     if (screen === "study" && uiState.studyMode) {
         playSound("study");
     }
+    renderMusicSystem();
 }
 
 function populateForms() {
@@ -903,6 +1241,11 @@ function populateForms() {
     document.getElementById("profileUsername").value = state.profile.username || "";
     document.getElementById("profileEmail").value = state.profile.email || currentUser?.email || "";
     document.getElementById("profileTitleInput").value = state.profile.title || "";
+    document.getElementById("bodyType").value = state.profile.bodyType || "";
+    document.getElementById("fitnessStats").value = state.profile.fitnessStats || "";
+    document.getElementById("relationshipStatus").value = state.profile.relationshipStatus || "";
+    document.getElementById("lifestyleHabits").value = state.profile.lifestyleHabits || "";
+    document.getElementById("customAttributes").value = state.profile.customAttributes || "";
     document.getElementById("plannedWakeTime").value = state.profile.plannedWakeTime || "06:00";
     document.getElementById("plannedSleepTime").value = state.profile.plannedSleepTime || "22:30";
     document.getElementById("profileMission").value = state.profile.mission || "";
@@ -941,7 +1284,8 @@ function calculateMetrics() {
     const positiveSocial = state.socialLogs.filter((item) => item.impact === "Positive").length;
     const negativeSocial = state.socialLogs.filter((item) => item.impact === "Negative").length;
     const emotionalRepairs = state.emotionLogs.filter((item) => item.betterResponse).length + (state.dailyLog.betterResponse ? 1 : 0);
-    const averageStyle = average(state.wardrobeLogs.map((item) => Number(item.rating || 0)));
+    const styleSource = state.wardrobeItems?.length ? state.wardrobeItems : state.wardrobeLogs;
+    const averageStyle = average(styleSource.map((item) => Number(item.rating || 0)));
     const positiveEntries = splitEntries(state.dailyLog.positiveActions);
     const negativeEntries = splitEntries(state.dailyLog.negativeActions);
     const habitCount = Array.isArray(state.dailyLog.habitChecklist) ? state.dailyLog.habitChecklist.length : 0;
@@ -961,7 +1305,7 @@ function calculateMetrics() {
         .filter((item) => item.status === "done")
         .reduce((total, item) => total + Number(item.xp ?? item.TXP ?? 0), 0);
     const workoutBlocks = Math.floor(Number(state.dailyLog.exerciseMinutes || 0) / 20);
-    const xp = clampNumber(Math.round(
+    const activityXp = clampNumber(Math.round(
         Number(state.dailyLog.studyHours || 0) * 20
         + Number(state.dailyLog.codingHours || 0) * 15
         + workoutBlocks * 15
@@ -980,9 +1324,10 @@ function calculateMetrics() {
         - skippedTasks * 15
         - negativeSocial * 10
     ), 0, 999999);
-
-    const level = Math.floor(xp / 500) + 1;
-    const xpProgress = xp % 500;
+    const progression = state.progression || {};
+    const level = Number(progression.level || 1);
+    const xpProgress = Number(progression.txp ?? activityXp);
+    const xpNeeded = Number(progression.nextLevelXP || calculateNextLevelXP(level));
     const productivityScore = clampNumber(Math.round(
         Number(state.dailyLog.studyHours || 0) * 12
         + Number(state.dailyLog.codingHours || 0) * 10
@@ -995,10 +1340,10 @@ function calculateMetrics() {
     ), 0, 100);
 
     return {
-        xp,
+        xp: xpProgress,
         level,
         xpProgress,
-        xpNeeded: 500,
+        xpNeeded,
         productivityScore,
         productiveReels,
         distractingReels,
@@ -1056,15 +1401,22 @@ async function checkHealth() {
 
 async function analyzeReel(payload) {
     try {
-        const response = await fetch("/api/analyze/reel", {
+        const response = await fetch("/api/reels/analyze", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                userId: payload.userId || currentUser?.email || "local",
+                platform: payload.platform || "Other Website",
+                url: payload.url || payload.link,
+                caption: payload.caption || "",
+                notes: payload.notes || "",
+                title: payload.title || ""
+            })
         });
         if (!response.ok) {
             throw new Error("API failed");
         }
-        return await response.json();
+        return normalizeReelResponse(await response.json());
     } catch (error) {
         return localAnalyzeReel(payload);
     }
@@ -1138,6 +1490,14 @@ function renderAll() {
     renderReport();
     renderEditableTimetable();
     renderProgression(metrics);
+    renderStatusPanel(metrics);
+    renderGoalSystem();
+    renderPersonalProfileSummary();
+    renderQuickNotes();
+    renderStreakPanels();
+    renderNotesScreen();
+    renderAnalyticsScreen(metrics);
+    renderFocusTimer();
     renderImportedWeek(state.importStatus === "confirmed");
     renderMusicSystem();
     showDailyQuote();
@@ -1163,12 +1523,195 @@ function renderProgression(metrics) {
     document.getElementById("levelBadge").textContent = `LVL ${level} ${progression.tier || ""}`.trim();
     const rankBadge = document.getElementById("rankBadge");
     if (rankBadge) {
-        rankBadge.textContent = `RANK ${rank.replace("_", " ")}`;
+        rankBadge.textContent = `RANK ${rank.replaceAll("_", " ")}`;
         rankBadge.style.borderColor = progression.rankColor || "";
         rankBadge.style.boxShadow = `0 0 18px ${progression.rankColor || "rgba(167,139,250,.45)"}`;
     }
     document.getElementById("xpReadout").textContent = `${txp} / ${next} TXP`;
     document.getElementById("xpBar").style.width = `${clampNumber(progress, 0, 100)}%`;
+}
+
+function renderStatusPanel(metrics) {
+    const progression = state.progression || {};
+    const level = progression.level || metrics.level || 1;
+    const txp = progression.txp ?? metrics.xpProgress ?? 0;
+    const next = progression.nextLevelXP || metrics.xpNeeded || calculateNextLevelXP(level);
+    const score = progression.score ?? metrics.productivityScore ?? 0;
+    const rank = String(progression.rank || "E").replace("_", " ");
+    const energy = clampNumber(100 - splitEntries(state.dailyLog.negativeActions).length * 12 - state.timetable.filter((task) => task.status === "skip").length * 8, 10, 100);
+    const focus = clampNumber(metrics.stats?.Focus ?? score, 0, 100);
+    const hp = clampNumber(80 + (state.dailyLog.mood === "Calm" ? 10 : 0) - (state.dailyLog.mood === "Angry" ? 20 : 0), 20, 100);
+    setText("statusLevel", level);
+    setText("statusRank", rank);
+    setText("statusTxp", `${txp} / ${next} total ${progression.totalTXP ?? 0}`);
+    setText("statusEnergy", `${energy}%`);
+    setText("statusFocus", `${focus}%`);
+    setText("statusHp", `${hp}%`);
+    setText("identityValue", identityFor(level, progression.rank || "E"));
+    const cap = document.getElementById("statusRankCap");
+    if (cap) {
+        cap.textContent = `Max rank now: ${rankCapForLevel(level)}`;
+    }
+}
+
+function renderGoalSystem() {
+    const tasks = [...state.timetable].sort((left, right) => left.time.localeCompare(right.time));
+    const done = tasks.filter((task) => task.status === "done").length;
+    setText("goalSummaryValue", `${done}/${tasks.length}`);
+    const html = tasks.length ? tasks.map((task) => {
+        const progress = task.status === "done" ? 100 : task.status === "skip" ? 0 : 35;
+        return `
+            <div class="goal-row ${task.status === "done" ? "completed" : ""}">
+                <label class="check-row"><input type="checkbox" data-goal-task="${task.id}" ${task.status === "done" ? "checked" : ""}> ${task.time} - ${task.title}</label>
+                <div class="goal-progress"><span style="width:${progress}%"></span></div>
+                <small>${task.priority || "MEDIUM"} | ${task.category || "General"} | +${taskRewardAmount(task)} TXP</small>
+            </div>
+        `;
+    }).join("") : `<div class="empty-state">No quests yet. Import or add timetable tasks first.</div>`;
+    ["goalQuestList", "goalsPageList"].forEach((id) => {
+        const list = document.getElementById(id);
+        if (list) list.innerHTML = html;
+    });
+}
+
+function renderPersonalProfileSummary() {
+    const box = document.getElementById("personalProfileSummary");
+    if (!box) {
+        return;
+    }
+    const items = [
+        ["Body", state.profile.bodyType || "Not set"],
+        ["Fitness", state.profile.fitnessStats || "Not set"],
+        ["Relationship", state.profile.relationshipStatus || "Not set"],
+        ["Lifestyle", state.profile.lifestyleHabits || "Not set"],
+        ["Attributes", state.profile.customAttributes || "Discipline in progress"],
+        ["Sleep Target", `${state.profile.plannedWakeTime || "06:00"} -> ${state.profile.plannedSleepTime || "22:30"}`]
+    ];
+    box.innerHTML = items.map(([label, value]) => `<div><span>${label}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+}
+
+function renderQuickNotes() {
+    const list = document.getElementById("quickNotesList");
+    if (!list) {
+        return;
+    }
+    const notes = state.notes || [];
+    list.innerHTML = notes.slice(0, 4).map((note) => `
+        <div class="list-item">
+            <div class="task-row"><strong>${escapeHtml(note.text)}</strong><span class="tag">${escapeHtml(note.category)}</span></div>
+            <div class="task-meta"><span>${new Date(note.createdAt).toLocaleString()}</span></div>
+        </div>
+    `).join("") || `<div class="empty-state">No notes yet.</div>`;
+}
+
+function renderStreakPanels() {
+    const streak = Number(state.progression?.streak || 0);
+    const best = Math.max(streak, Number(state.bestStreak || 0));
+    state.bestStreak = best;
+    const done = state.timetable.filter((task) => task.status === "done").length;
+    const total = state.timetable.length;
+    setText("dashStreak", streak);
+    setText("streakCurrent", streak);
+    setText("bestStreak", best);
+    setText("streakGoalCount", `${done}/${total}`);
+    setText("streakBonus", streak >= 30 ? "200 TXP" : streak >= 7 ? "50 TXP" : streak >= 3 ? "20 TXP" : "0 TXP");
+    const html = Array.from({ length: 7 }, (_, index) => `<span class="${index < Math.min(7, streak) ? "active" : ""}">${["M","T","W","T","F","S","S"][index]}</span>`).join("");
+    ["dashWeekStreak", "streakCalendar"].forEach((id) => {
+        const node = document.getElementById(id);
+        if (node) node.innerHTML = html;
+    });
+    const warning = done > 0 ? "Streak protected today." : "Complete one goal today to protect the streak.";
+    setText("streakWarning", warning);
+    setText("streakPanelWarning", warning);
+}
+
+function renderNotesScreen() {
+    const list = document.getElementById("notesList");
+    if (!list) return;
+    const query = String(document.getElementById("noteSearch")?.value || "").toLowerCase();
+    const notes = [...(state.notes || [])]
+        .filter((note) => !query || `${note.text} ${note.category}`.toLowerCase().includes(query))
+        .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || new Date(b.createdAt) - new Date(a.createdAt));
+    setText("notesCount", `${notes.length}`);
+    list.innerHTML = notes.map((note) => `
+        <div class="list-item note-row ${note.pinned ? "pinned" : ""}">
+            <div class="task-row"><strong>${note.pinned ? "PIN " : ""}${escapeHtml(note.text)}</strong><span class="tag">${escapeHtml(note.category)}</span></div>
+            <div class="task-meta"><span>${new Date(note.createdAt).toLocaleString()}</span></div>
+            <div class="task-actions">
+                <button class="small-btn" data-note-action="pin" data-note-id="${note.id}">${note.pinned ? "Unpin" : "Pin"}</button>
+                <button class="small-btn" data-note-action="edit" data-note-id="${note.id}">Edit</button>
+                <button class="small-btn danger-btn" data-note-action="delete" data-note-id="${note.id}">Delete</button>
+            </div>
+        </div>
+    `).join("") || `<div class="empty-state">No notes match your search.</div>`;
+}
+
+function renderAnalyticsScreen(metrics) {
+    setText("analyticsTotalTxp", state.progression?.totalTXP ?? state.progression?.txp ?? 0);
+    setText("analyticsProductivity", `${state.progression?.score ?? metrics.productivityScore}%`);
+    setText("analyticsTasksDone", state.timetable.filter((task) => task.status === "done").length);
+    setText("analyticsFocusSessions", (state.focusSessions || []).length);
+    const box = document.getElementById("analyticsStatsGrid");
+    if (box) {
+        box.innerHTML = Object.entries(metrics.stats).map(([label, value]) => `
+            <div class="stat-box"><div class="stat-value">${value}</div><div class="stat-label">${label}</div><div class="stat-bar"><div class="stat-bar-fill" style="width:${value}%"></div></div></div>
+        `).join("");
+    }
+}
+
+function renderFocusTimer() {
+    const total = Math.max(1, focusTotalSeconds || 1500);
+    const elapsed = clampNumber(total - Math.max(0, focusRemainingSeconds), 0, total);
+    const progress = Math.round((elapsed / total) * 100);
+    const stage = focusStage(progress);
+    setText("focusTimerReadout", formatSeconds(focusRemainingSeconds));
+    setText("focusModalTime", formatSeconds(focusRemainingSeconds));
+    setText("focusPlantStage", stage.name);
+    setText("focusStageBadge", stage.name);
+    setText("focusProgressPercent", `${progress}%`);
+    setText("focusProgressHint", stage.hint);
+    setText("focusModalMode", labelForTimerMode());
+    setText("focusModalSession", `${labelForTimerMode()} Session`);
+    const stateLabel = document.getElementById("focusState");
+    if (stateLabel) {
+        stateLabel.textContent = uiState.focusModeActive ? "Deep Work" : "Idle";
+    }
+    const ring = document.querySelector(".timer-ring");
+    if (ring) ring.style.setProperty("--timer-progress", String(progress));
+    const circle = document.getElementById("timerProgressCircle");
+    if (circle) {
+        const circumference = 2 * Math.PI * 94;
+        circle.style.strokeDasharray = `${circumference}`;
+        circle.style.strokeDashoffset = `${circumference - (progress / 100) * circumference}`;
+    }
+    const plant = document.getElementById("plantVisual");
+    if (plant) plant.className = `plant-visual stage-${stage.key}`;
+    const startButton = document.getElementById("timerStartPauseBtn");
+    if (startButton) startButton.textContent = uiState.focusModeActive ? "Pause" : focusRemainingSeconds < total ? "Resume" : "Start";
+    const nature = document.getElementById("natureSoundBtn");
+    if (nature) nature.textContent = uiState.natureSound ? "Nature Sounds On" : "Nature Sounds Off";
+    document.body.classList.toggle("focus-mode-active", Boolean(uiState.focusModeActive));
+}
+
+function focusStage(progress) {
+    if (progress >= 75) return { key: "bloom", name: "Bloom", hint: "Your focus is blooming. Finish clean." };
+    if (progress >= 50) return { key: "growth", name: "Growth", hint: "Momentum is building. Stay with it." };
+    if (progress >= 25) return { key: "sprout", name: "Sprout", hint: "The session is taking root." };
+    return { key: "seedling", name: "Seedling", hint: "Stay focused and help your plant grow." };
+}
+
+function labelForTimerMode() {
+    const mode = document.getElementById("timerMode")?.value || "focus";
+    return {
+        focus: "Focus Timer",
+        pomodoro: "Pomodoro Timer",
+        deep: "Deep Work",
+        custom: "Custom Timer"
+    }[mode] || "Focus Timer";
+}
+
+function calculateTimerReward(minutes) {
+    return Math.max(5, Math.round(Number(minutes || 0) * 1.5));
 }
 
 function renderStats(metrics) {
@@ -1209,6 +1752,7 @@ function renderCurrentTaskSummary(metrics) {
             <div class="task-actions">
                 <button class="small-btn" data-task-action="done" data-task-id="${task.id}" data-state="done">Complete</button>
                 <button class="small-btn" data-task-action="skip" data-task-id="${task.id}" data-state="skip">Skip</button>
+                <button class="primary-btn" data-start-task-timer="${task.id}">Start Now</button>
             </div>
         </div>
     `;
@@ -1384,39 +1928,744 @@ function renderReelLibrary() {
             <p><strong>Action:</strong> ${reel.actionItem}</p>
             <div class="task-actions">
                 ${reel.affectTimetable ? `<button class="small-btn" data-reel-action="add" data-reel-id="${reel.id}">Add to timetable</button>` : ""}
+                <button class="small-btn danger-btn" data-reel-action="delete" data-reel-id="${reel.id}">Delete</button>
             </div>
         </div>
     `).join("");
 }
 
 function renderSocialLogs() {
-    renderSimpleList("socialList", state.socialLogs, (item) => `
-        <div class="list-item">
-            <strong>${item.person} - ${item.place}</strong>
-            <div class="task-meta">
-                <span>${item.impact} impact</span>
-            </div>
-            <p>${item.lesson || "No lesson added yet."}</p>
-        </div>
-    `, "No social entries yet.");
+    const target = document.getElementById("socialList");
+    if (!target) return;
+    const logs = state.socialLogs || [];
+    if (!logs.length) {
+        target.innerHTML = `<div class="empty-state">No friends saved yet. Add one strong influence to begin.</div>`;
+    } else {
+        target.innerHTML = logs.map((item) => `
+            <article class="friend-row">
+                <img src="${item.photoUrl || "/assets/kaalix-logo.png"}" alt="${escapeHtml(item.person || item.name)}">
+                <div class="friend-row-main">
+                    <strong>${escapeHtml(item.person || item.name)}</strong>
+                    <span>${escapeHtml(item.place || "Unknown place")}</span>
+                    <div class="friend-tags">
+                        <em class="impact-${String(item.impact || "Neutral").toLowerCase()}">${escapeHtml(item.impact || "Neutral")}</em>
+                        ${(item.tags || "").split(",").filter(Boolean).slice(0, 2).map((tag) => `<em>${escapeHtml(tag.trim())}</em>`).join("")}
+                    </div>
+                    <p>${escapeHtml(item.enhancedLesson || item.lesson || "No lesson added.")}</p>
+                </div>
+                <div class="friend-row-actions">
+                    <span>${formatDate(item.createdAt)}</span>
+                    <button type="button" data-friend-action="edit" data-friend-id="${item.id}">Edit</button>
+                    <button type="button" data-friend-action="delete" data-friend-id="${item.id}">Delete</button>
+                </div>
+            </article>
+        `).join("");
+    }
+    const total = document.getElementById("friendTotalCount");
+    if (total) total.textContent = `Total Interactions: ${logs.length}`;
 }
 
 function renderStyleLogs() {
-    renderSimpleList("styleList", state.wardrobeLogs, (item) => `
-        <div class="list-item">
-            <strong>${item.outfit}</strong>
-            <div class="task-meta">
-                <span>${item.occasion}</span>
-                <span>Rating ${item.rating}/5</span>
+    renderWardrobeModule();
+}
+
+async function loadFriends() {
+    if (!state || !currentUser) return;
+    try {
+        const response = await fetch(`/api/friends?userId=${encodeURIComponent(currentUser.email)}`);
+        if (!response.ok) throw new Error("Friends API failed");
+        state.socialLogs = (await response.json()).map(normalizeFriendResponse);
+        persistState();
+    } catch (error) {
+        renderSocialLogs();
+    }
+}
+
+async function saveFriendLog(event) {
+    event.preventDefault();
+    if (!state || !currentUser) return;
+    const name = document.getElementById("socialPerson").value.trim();
+    if (!name) {
+        showToast("Friend name is required.");
+        return;
+    }
+    const id = document.getElementById("friendId").value;
+    const payload = {
+        userId: currentUser.email,
+        photoUrl: document.getElementById("friendPhotoUrl").value,
+        name,
+        contactNumber: document.getElementById("friendContact").value.trim(),
+        countryCode: document.getElementById("friendCountryCode").value,
+        place: document.getElementById("socialPlace").value.trim(),
+        impact: document.getElementById("socialImpact").value,
+        lessonLearned: document.getElementById("socialLesson").value.trim(),
+        enhancedLesson: document.getElementById("friendEnhancedLesson").value.trim(),
+        tags: document.getElementById("friendTags").value.trim()
+    };
+    try {
+        const response = await fetch(id ? `/api/friends/${id}` : "/api/friends", {
+            method: id ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error("Friend save failed");
+        const saved = normalizeFriendResponse(await response.json());
+        state.socialLogs = id
+            ? state.socialLogs.map((item) => String(item.id) === String(id) ? saved : item)
+            : [saved, ...(state.socialLogs || [])];
+        clearFriendForm();
+        persistState();
+        showToast("Friend saved.");
+    } catch (error) {
+        const local = normalizeFriendResponse({ id: id || `local-${uid()}`, ...payload, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        state.socialLogs = id
+            ? state.socialLogs.map((item) => String(item.id) === String(id) ? local : item)
+            : [local, ...(state.socialLogs || [])];
+        clearFriendForm();
+        persistState();
+        showToast("Saved locally. Backend sync failed.");
+    }
+}
+
+async function uploadFriendPhoto(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) {
+        showToast("Use JPG, PNG, or WebP under 5MB.");
+        event.target.value = "";
+        return;
+    }
+    try {
+        const form = new FormData();
+        form.append("file", file);
+        const response = await fetch("/api/friends/upload-photo", { method: "POST", body: form });
+        if (!response.ok) throw new Error("Photo upload failed");
+        const result = await response.json();
+        setFriendPhoto(result.photoUrl);
+        showToast("Friend photo uploaded.");
+    } catch (error) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            setFriendPhoto(reader.result);
+            showToast("Photo preview saved locally.");
+        };
+        reader.readAsDataURL(file);
+    } finally {
+        event.target.value = "";
+    }
+}
+
+function setFriendPhoto(url) {
+    document.getElementById("friendPhotoUrl").value = url || "";
+    document.getElementById("friendPhotoPreview").src = url || "/assets/kaalix-logo.png";
+}
+
+function handleFriendAction(event) {
+    const button = event.target.closest("[data-friend-action]");
+    if (!button || !state) return;
+    const item = state.socialLogs.find((entry) => String(entry.id) === String(button.dataset.friendId));
+    if (!item) return;
+    if (button.dataset.friendAction === "edit") {
+        document.getElementById("friendId").value = item.id;
+        setFriendPhoto(item.photoUrl);
+        document.getElementById("socialPerson").value = item.person || item.name || "";
+        document.getElementById("friendContact").value = item.contactNumber || "";
+        document.getElementById("friendCountryCode").value = item.countryCode || "+91";
+        document.getElementById("socialPlace").value = item.place || "";
+        document.getElementById("socialImpact").value = item.impact || "Neutral";
+        document.getElementById("socialLesson").value = item.lesson || item.lessonLearned || "";
+        document.getElementById("friendEnhancedLesson").value = item.enhancedLesson || "";
+        document.getElementById("friendTags").value = item.tags || "";
+    }
+    if (button.dataset.friendAction === "delete") {
+        state.socialLogs = state.socialLogs.filter((entry) => String(entry.id) !== String(item.id));
+        if (!String(item.id).startsWith("local")) {
+            fetch(`/api/friends/${item.id}`, { method: "DELETE" }).catch(() => {});
+        }
+        persistState();
+        showToast("Friend entry deleted.");
+    }
+}
+
+function clearFriendForm() {
+    document.getElementById("socialForm")?.reset();
+    document.getElementById("friendId").value = "";
+    setFriendPhoto("");
+}
+
+function exportFriendHistory() {
+    const rows = [["Name", "Country Code", "Contact", "Place", "Impact", "Lesson", "Enhanced Lesson", "Tags", "Created"]];
+    (state.socialLogs || []).forEach((item) => rows.push([
+        item.person || item.name || "",
+        item.countryCode || "",
+        item.contactNumber || "",
+        item.place || "",
+        item.impact || "",
+        item.lesson || item.lessonLearned || "",
+        item.enhancedLesson || "",
+        item.tags || "",
+        item.createdAt || ""
+    ]));
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "kaalix-friends-history.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("Friend history exported.");
+}
+
+function normalizeFriendResponse(item) {
+    return {
+        id: item.id,
+        photoUrl: item.photoUrl || "",
+        person: item.name || item.person || "",
+        name: item.name || item.person || "",
+        contactNumber: item.contactNumber || "",
+        countryCode: item.countryCode || "+91",
+        place: item.place || "",
+        impact: item.impact || "Neutral",
+        lesson: item.lessonLearned || item.lesson || "",
+        lessonLearned: item.lessonLearned || item.lesson || "",
+        enhancedLesson: item.enhancedLesson || "",
+        tags: item.tags || "",
+        createdAt: item.createdAt || new Date().toISOString(),
+        updatedAt: item.updatedAt || new Date().toISOString()
+    };
+}
+
+async function loadReels() {
+    if (!state || !currentUser) return;
+    try {
+        const response = await fetch(`/api/reels?userId=${encodeURIComponent(currentUser.email)}`);
+        if (!response.ok) throw new Error("Reels API failed");
+        state.reels = (await response.json()).map(normalizeReelResponse);
+        persistState();
+    } catch (error) {
+        renderReelLibrary();
+    }
+}
+
+function normalizeReelResponse(item) {
+    return {
+        id: item.id || uid(),
+        reelLink: item.url || item.reelLink || "",
+        link: item.url || item.reelLink || "",
+        platform: item.platform || "Other Website",
+        titleOrCaption: item.title || item.titleOrCaption || "Untitled insight",
+        keywords: item.keywords || [],
+        category: item.category || "Productivity",
+        summary: item.summary || "",
+        lessonLearned: item.lesson || item.lessonLearned || "",
+        actionItem: item.actionItem || item.action_item || "",
+        priorityLevel: item.priority || item.priorityLevel || "Medium",
+        affectTimetable: Boolean(item.shouldUpdateTimetable ?? item.affectTimetable),
+        productive: (item.category || "") !== "Negative / Time Waste",
+        productiveLabel: (item.category || "") === "Negative / Time Waste" ? "Distraction Risk" : "Productive",
+        suggestedTaskTitle: item.category || "Planning review",
+        suggestedDurationMinutes: 20,
+        suggestedTimeWindow: "Evening",
+        createdAt: item.createdAt || new Date().toISOString()
+    };
+}
+
+function handleReelPlatformSelect(event) {
+    const button = event.target.closest("[data-platform]");
+    if (!button) return;
+    document.querySelectorAll(".platform-card").forEach((item) => item.classList.remove("active"));
+    button.classList.add("active");
+    document.getElementById("reelPlatform").value = button.dataset.platform;
+}
+
+function renderWardrobeModule() {
+    if (!state) return;
+    const filters = state.wardrobeFilters || {};
+    const items = filteredWardrobeItems();
+    renderWardrobeTabs(filters.category || "All Items");
+    renderWardrobeCounts();
+    const title = document.getElementById("wardrobeGridTitle");
+    if (title) title.textContent = `${filters.category || "All Items"} (${items.length})`;
+    const grid = document.getElementById("wardrobeGrid");
+    if (grid) {
+        grid.classList.toggle("list-view", Boolean(filters.listView));
+        grid.innerHTML = items.length ? items.map(renderWardrobeCard).join("") : `
+            <div class="wardrobe-empty">
+                <strong>Upload your first clothing item to build your virtual wardrobe.</strong>
+                <p>Single clothes, multiple items, and messy outfit photos are supported by the placeholder AI workflow.</p>
+            </div>`;
+    }
+    const recent = document.getElementById("recentWardrobeItems");
+    if (recent) {
+        recent.innerHTML = (state.wardrobeItems || []).slice(0, 5).map(renderRecentWardrobeItem).join("") || `<p class="muted">No recent items yet.</p>`;
+    }
+    const combos = document.getElementById("wardrobeCombos");
+    if (combos) {
+        combos.innerHTML = (state.outfitCombos || []).length
+            ? state.outfitCombos.map(renderOutfitCombo).join("")
+            : `<div class="wardrobe-empty small"><strong>No combos yet.</strong><p>Add at least one top, one bottom, and one shoe to generate outfit combos.</p></div>`;
+    }
+    const search = document.getElementById("wardrobeSearch");
+    if (search && search.value !== (filters.search || "")) search.value = filters.search || "";
+    document.getElementById("wardrobeGridViewBtn")?.classList.toggle("active", !filters.listView);
+    document.getElementById("wardrobeListViewBtn")?.classList.toggle("active", Boolean(filters.listView));
+}
+
+function renderWardrobeTabs(active) {
+    const target = document.getElementById("wardrobeTabs");
+    if (!target) return;
+    target.innerHTML = WARDROBE_CATEGORIES.map((category) => `
+        <button class="${category === active ? "active" : ""}" type="button" data-wardrobe-category="${category}">${category}</button>
+    `).join("");
+}
+
+function renderWardrobeCounts() {
+    const target = document.getElementById("wardrobeCounts");
+    if (!target) return;
+    const counts = wardrobeCounts();
+    const icons = { Shirts: "♕", Pants: "▥", Shoes: "⌁", Accessories: "◇", Watches: "◷", Jackets: "♜" };
+    target.innerHTML = WARDROBE_COUNT_CATEGORIES.map((category) => `
+        <button class="wardrobe-count-card" type="button" data-wardrobe-category="${category}">
+            <span>${icons[category] || "◆"}</span>
+            <div><small>${category}</small><strong>${counts[category] || 0}</strong><em>items</em></div>
+        </button>
+    `).join("");
+}
+
+function renderWardrobeCard(item) {
+    return `
+        <article class="wardrobe-card" data-wardrobe-id="${item.id}">
+            <div class="wardrobe-thumb">
+                ${item.imageUrl ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.name)}">` : `<span>${categoryGlyph(item.category)}</span>`}
+                <button class="wardrobe-menu" type="button" data-wardrobe-action="edit" data-wardrobe-id="${item.id}">⋮</button>
+                <span class="wardrobe-badge">${item.category || "Other"}</span>
             </div>
-            <p>${item.notes || "No notes added."}</p>
-        </div>
-    `, "No style history yet.");
+            <div class="wardrobe-card-meta">
+                <strong>${escapeHtml(item.name || "Wardrobe Item")}</strong>
+                <span>${escapeHtml(item.color || "Unknown")} · ${escapeHtml(item.occasion || "Casual")}</span>
+                <div class="wardrobe-card-actions">
+                    <button type="button" data-wardrobe-action="favorite" data-wardrobe-id="${item.id}">${item.favorite ? "♥" : "♡"}</button>
+                    <button type="button" data-wardrobe-action="edit" data-wardrobe-id="${item.id}">Edit</button>
+                    <button type="button" data-wardrobe-action="delete" data-wardrobe-id="${item.id}">Delete</button>
+                </div>
+            </div>
+        </article>`;
+}
+
+function renderRecentWardrobeItem(item) {
+    return `
+        <button class="recent-wardrobe-item" type="button" data-wardrobe-action="edit" data-wardrobe-id="${item.id}">
+            ${item.imageUrl ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.name)}">` : `<span>${categoryGlyph(item.category)}</span>`}
+            <em>${item.category || "Item"}</em>
+        </button>`;
+}
+
+function renderOutfitCombo(combo) {
+    const items = combo.items || [];
+    return `
+        <article class="combo-card">
+            <div class="combo-images">
+                ${items.slice(0, 4).map((item) => item.imageUrl ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.name)}">` : `<span>${categoryGlyph(item.category)}</span>`).join("")}
+            </div>
+            <div class="combo-copy">
+                <div><strong>${escapeHtml(combo.name || "AI Combo")}</strong><span class="match-tag">${combo.matchScore || 0}% Match</span></div>
+                <p>${escapeHtml(combo.aiReason || "Generated from your wardrobe colors and occasions.")}</p>
+                <div class="combo-actions">
+                    <button type="button" data-combo-action="save" data-combo-id="${combo.id}">${combo.saved ? "Saved" : "Save"}</button>
+                    <button type="button" data-combo-action="delete" data-combo-id="${combo.id}">Remove</button>
+                </div>
+            </div>
+        </article>`;
+}
+
+function filteredWardrobeItems() {
+    const filters = state.wardrobeFilters || {};
+    const search = (filters.search || "").toLowerCase();
+    return (state.wardrobeItems || []).filter((item) => {
+        const text = `${item.name} ${item.category} ${item.color} ${item.occasion} ${item.tags} ${item.notes}`.toLowerCase();
+        return (!filters.category || filters.category === "All Items" || item.category === filters.category)
+            && (!filters.color || sameText(item.color, filters.color))
+            && (!filters.occasion || sameText(item.occasion, filters.occasion))
+            && (!filters.season || sameText(item.season, filters.season))
+            && (!filters.favorite || item.favorite)
+            && (!filters.rating || Number(item.rating || 0) >= Number(filters.rating))
+            && (!search || text.includes(search));
+    });
+}
+
+function wardrobeCounts() {
+    return (state.wardrobeItems || []).reduce((map, item) => {
+        map[item.category] = (map[item.category] || 0) + 1;
+        return map;
+    }, {});
+}
+
+async function loadWardrobeLibrary() {
+    if (!state || !currentUser) return;
+    try {
+        const userKey = encodeURIComponent(currentUser.email);
+        const [itemsResponse, combosResponse] = await Promise.all([
+            fetch(`/api/wardrobe/items?userKey=${userKey}`),
+            fetch(`/api/wardrobe/outfits?userKey=${userKey}`)
+        ]);
+        if (!itemsResponse.ok || !combosResponse.ok) throw new Error("Wardrobe API unavailable");
+        state.wardrobeItems = await itemsResponse.json();
+        state.outfitCombos = await combosResponse.json();
+        persistState();
+    } catch (error) {
+        renderWardrobeModule();
+    }
+}
+
+async function handleWardrobeFileSelect(event) {
+    await uploadWardrobeFiles(Array.from(event.target.files || []));
+    event.target.value = "";
+}
+
+async function handleWardrobeDrop(event) {
+    event.preventDefault();
+    event.currentTarget.classList.remove("dragging");
+    await uploadWardrobeFiles(Array.from(event.dataTransfer?.files || []));
+}
+
+async function uploadWardrobeFiles(files) {
+    if (!state || !currentUser || !files.length) return;
+    const valid = files.filter(validateWardrobeFile);
+    if (!valid.length) return;
+    const preview = document.getElementById("wardrobeUploadPreview");
+    if (preview) preview.textContent = `Uploading ${valid.length} image(s)...`;
+    const form = new FormData();
+    form.append("userKey", currentUser.email);
+    valid.forEach((file) => form.append("files", file));
+    const details = readWardrobeForm();
+    Object.entries(details).forEach(([key, value]) => {
+        if (value !== "" && value !== null && value !== undefined) form.append(key, value);
+    });
+    try {
+        const response = await fetch("/api/wardrobe/upload", { method: "POST", body: form });
+        if (!response.ok) throw new Error(await response.text());
+        const result = await response.json();
+        state.wardrobeItems = uniqueWardrobeItems([...(result.items || []), ...(state.wardrobeItems || [])]);
+        if (preview) preview.textContent = result.message || "Wardrobe image imported.";
+        persistState();
+        await generateWardrobeCombos(true);
+        showToast("Wardrobe item imported.");
+    } catch (error) {
+        const localGroups = await Promise.all(valid.map(createLocalWardrobeItems));
+        const localItems = localGroups.flat();
+        state.wardrobeItems = uniqueWardrobeItems([...localItems, ...(state.wardrobeItems || [])]);
+        if (preview) preview.textContent = "Backend unavailable. Saved locally.";
+        persistState();
+        await generateWardrobeCombos(true);
+        showToast("Wardrobe saved locally. Backend sync failed.");
+    }
+}
+
+function validateWardrobeFile(file) {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+        showToast("Use JPG, PNG, or WebP only.");
+        return false;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+        showToast(`${file.name} is larger than 5MB.`);
+        return false;
+    }
+    return true;
+}
+
+function createLocalWardrobeItems(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const details = readWardrobeForm();
+            const detectedCategory = detectWardrobeCategory(file.name);
+            const color = details.color || detectWardrobeColor(file.name);
+            const categories = details.category ? [details.category] : (detectedCategory === "Others" ? ["Shirts", "Pants", "Shoes"] : [detectedCategory]);
+            resolve(categories.map((category, index) => ({
+                id: `local-${uid()}`,
+                userId: currentUser.email,
+                name: details.name || `${index ? ["Black Pant", "White Shoe"][index - 1] || category : `${color} ${category.replace(/s$/, "")}`}`,
+                category,
+                subCategory: category,
+                color: index === 1 ? "Black" : index === 2 ? "White" : color,
+                occasion: details.occasion || "Casual",
+                season: details.season || "All Season",
+                imageUrl: reader.result,
+                originalImageUrl: reader.result,
+                tags: details.tags || `${category}, ${color}`,
+                notes: details.notes || "Local placeholder item.",
+                rating: Number(details.rating || 4),
+                favorite: Boolean(details.favorite),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            })));
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+async function saveWardrobeItem(event) {
+    event.preventDefault();
+    if (!state) return;
+    const id = document.getElementById("wardrobeItemId").value;
+    const existing = (state.wardrobeItems || []).find((item) => String(item.id) === String(id));
+    if (!existing) {
+        showToast("Upload an image first, then edit the item.");
+        return;
+    }
+    const payload = readWardrobeForm();
+    try {
+        if (!String(id).startsWith("local")) {
+            const response = await fetch(`/api/wardrobe/items/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) throw new Error("Update failed");
+            const updated = await response.json();
+            state.wardrobeItems = state.wardrobeItems.map((item) => String(item.id) === String(id) ? updated : item);
+        } else {
+            Object.assign(existing, payload, { updatedAt: new Date().toISOString() });
+        }
+        clearWardrobeEditor();
+        persistState();
+        showToast("Wardrobe item saved.");
+    } catch (error) {
+        Object.assign(existing, payload, { updatedAt: new Date().toISOString() });
+        clearWardrobeEditor();
+        persistState();
+        showToast("Saved locally. Backend sync failed.");
+    }
+}
+
+function readWardrobeForm() {
+    return {
+        name: document.getElementById("wardrobeName")?.value.trim() || "",
+        category: document.getElementById("wardrobeCategory")?.value || "",
+        color: document.getElementById("wardrobeColor")?.value.trim() || "",
+        occasion: document.getElementById("wardrobeOccasion")?.value || "Casual",
+        season: document.getElementById("wardrobeSeason")?.value || "All Season",
+        tags: document.getElementById("wardrobeNotes")?.value.trim() || "",
+        notes: document.getElementById("wardrobeNotes")?.value.trim() || "",
+        rating: Number(document.getElementById("wardrobeRating")?.value || 4),
+        favorite: Boolean(document.getElementById("wardrobeFavorite")?.checked)
+    };
+}
+
+function editWardrobeItem(item) {
+    document.getElementById("wardrobeItemId").value = item.id;
+    document.getElementById("wardrobeName").value = item.name || "";
+    document.getElementById("wardrobeCategory").value = item.category || "";
+    document.getElementById("wardrobeColor").value = item.color || "";
+    document.getElementById("wardrobeOccasion").value = item.occasion || "Casual";
+    document.getElementById("wardrobeSeason").value = item.season || "All Season";
+    document.getElementById("wardrobeNotes").value = item.notes || item.tags || "";
+    document.getElementById("wardrobeRating").value = item.rating || 4;
+    document.getElementById("wardrobeFavorite").checked = Boolean(item.favorite);
+    document.getElementById("wardrobeFormMode").textContent = "Editing";
+}
+
+function clearWardrobeEditor() {
+    document.getElementById("wardrobeItemForm")?.reset();
+    document.getElementById("wardrobeItemId").value = "";
+    document.getElementById("wardrobeRating").value = "4";
+    document.getElementById("wardrobeFormMode").textContent = "New Item";
+}
+
+function handleWardrobeTab(event) {
+    const button = event.target.closest("[data-wardrobe-category]");
+    if (!button || !state) return;
+    state.wardrobeFilters.category = button.dataset.wardrobeCategory;
+    persistState();
+}
+
+async function handleWardrobeCardAction(event) {
+    const button = event.target.closest("[data-wardrobe-action]");
+    if (!button || !state) return;
+    const item = state.wardrobeItems.find((entry) => String(entry.id) === String(button.dataset.wardrobeId));
+    if (!item) return;
+    const action = button.dataset.wardrobeAction;
+    if (action === "edit") {
+        editWardrobeItem(item);
+        return;
+    }
+    if (action === "favorite") {
+        item.favorite = !item.favorite;
+        try {
+            if (!String(item.id).startsWith("local")) {
+                await fetch(`/api/wardrobe/items/${item.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ favorite: item.favorite })
+                });
+            }
+        } catch (error) {}
+    }
+    if (action === "delete") {
+        state.wardrobeItems = state.wardrobeItems.filter((entry) => String(entry.id) !== String(item.id));
+        try {
+            if (!String(item.id).startsWith("local")) await fetch(`/api/wardrobe/items/${item.id}`, { method: "DELETE" });
+        } catch (error) {}
+    }
+    persistState();
+}
+
+async function handleWardrobeComboAction(event) {
+    const button = event.target.closest("[data-combo-action]");
+    if (!button || !state) return;
+    const id = button.dataset.comboId;
+    if (button.dataset.comboAction === "save") {
+        const combo = state.outfitCombos.find((item) => String(item.id) === String(id));
+        if (combo) combo.saved = true;
+        try { await fetch(`/api/wardrobe/outfits/${id}/save`, { method: "POST" }); } catch (error) {}
+    }
+    if (button.dataset.comboAction === "delete") {
+        state.outfitCombos = state.outfitCombos.filter((item) => String(item.id) !== String(id));
+        try { await fetch(`/api/wardrobe/outfits/${id}`, { method: "DELETE" }); } catch (error) {}
+    }
+    persistState();
+}
+
+async function generateWardrobeCombos(silent = false) {
+    if (!state || !currentUser) return;
+    const button = document.getElementById("wardrobeGenerateCombosBtn");
+    if (button) button.disabled = true;
+    try {
+        const response = await fetch(`/api/wardrobe/generate-combos?userKey=${encodeURIComponent(currentUser.email)}`, { method: "POST" });
+        if (!response.ok) throw new Error("Combo API failed");
+        state.outfitCombos = await response.json();
+    } catch (error) {
+        state.outfitCombos = generateLocalWardrobeCombos();
+    } finally {
+        if (button) button.disabled = false;
+        persistState();
+        if (!silent) showToast(state.outfitCombos.length ? "AI outfit combos generated." : "Add clothes first to generate outfit combos.");
+    }
+}
+
+function generateLocalWardrobeCombos() {
+    const items = state.wardrobeItems || [];
+    const tops = items.filter((item) => ["Shirts", "T-shirts", "Hoodies"].includes(item.category));
+    const bottoms = items.filter((item) => ["Pants", "Jeans"].includes(item.category));
+    const shoes = items.filter((item) => item.category === "Shoes");
+    const watches = items.filter((item) => item.category === "Watches");
+    if (!tops.length || !bottoms.length || !shoes.length) {
+        const available = [tops[0], bottoms[0], shoes[0], watches[0], ...items].filter(Boolean);
+        const unique = [];
+        available.forEach((item) => {
+            if (!unique.some((entry) => entry.id === item.id)) unique.push(item);
+        });
+        if (!unique.length) return [];
+        const missing = [
+            tops.length ? "" : "top",
+            bottoms.length ? "" : "bottom",
+            shoes.length ? "" : "shoes"
+        ].filter(Boolean);
+        return [{
+            id: `local-combo-${uid()}`,
+            name: "Assisted Combo Draft",
+            items: unique.slice(0, 4),
+            occasion: unique[0]?.occasion || "Casual",
+            matchScore: Math.max(58, 84 - (missing.length * 8)),
+            aiReason: missing.length
+                ? `Draft created from available wardrobe items. Add ${missing.join(", ")} to unlock a complete outfit combo.`
+                : "Draft created from your available wardrobe items.",
+            saved: false,
+            createdAt: new Date().toISOString()
+        }];
+    }
+    return tops.slice(0, 4).map((top, index) => {
+        const bottom = bottoms[index % bottoms.length];
+        const shoe = shoes[index % shoes.length];
+        const watch = watches[index % Math.max(1, watches.length)];
+        const comboItems = [top, bottom, shoe, watch].filter(Boolean);
+        return {
+            id: `local-combo-${uid()}`,
+            name: `${top.color || "Shadow"} ${bottom.category || "Combo"}`,
+            items: comboItems,
+            occasion: top.occasion || "Casual",
+            matchScore: 86 + (index * 3),
+            aiReason: `Clean ${top.occasion || "casual"} outfit using ${top.color || "neutral"} and ${bottom.color || "neutral"} tones.`,
+            saved: false,
+            createdAt: new Date().toISOString()
+        };
+    });
+}
+
+function applyWardrobeFilters() {
+    if (!state) return;
+    state.wardrobeFilters = {
+        ...(state.wardrobeFilters || {}),
+        category: document.getElementById("wardrobeFilterCategory").value,
+        color: document.getElementById("wardrobeFilterColor").value.trim(),
+        occasion: document.getElementById("wardrobeFilterOccasion").value.trim(),
+        season: document.getElementById("wardrobeFilterSeason").value,
+        rating: document.getElementById("wardrobeFilterRating").value,
+        favorite: document.getElementById("wardrobeFilterFavorite").checked
+    };
+    persistState();
+}
+
+function clearWardrobeFilters() {
+    state.wardrobeFilters = { category: "All Items", color: "", occasion: "", season: "", favorite: false, rating: "", search: "", listView: false };
+    ["wardrobeFilterColor", "wardrobeFilterOccasion", "wardrobeFilterRating", "wardrobeSearch"].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.value = "";
+    });
+    document.getElementById("wardrobeFilterCategory").value = "All Items";
+    document.getElementById("wardrobeFilterSeason").value = "";
+    document.getElementById("wardrobeFilterFavorite").checked = false;
+    persistState();
+}
+
+function setWardrobeView(listView) {
+    state.wardrobeFilters.listView = listView;
+    persistState();
+}
+
+function uniqueWardrobeItems(items) {
+    const seen = new Set();
+    return items.filter((item) => {
+        const key = String(item.id);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+function categoryGlyph(category) {
+    return { Shirts: "♕", "T-shirts": "T", Pants: "▥", Jeans: "▥", Shoes: "⌁", Watches: "◷", Accessories: "◇", Jackets: "♜", Hoodies: "⌂", Others: "◆" }[category] || "◆";
+}
+
+function detectWardrobeCategory(name) {
+    const source = String(name || "").toLowerCase();
+    if (source.includes("tshirt") || source.includes("tee")) return "T-shirts";
+    if (source.includes("shirt") || source.includes("top")) return "Shirts";
+    if (source.includes("jean")) return "Jeans";
+    if (source.includes("pant") || source.includes("trouser")) return "Pants";
+    if (source.includes("shoe") || source.includes("sneaker")) return "Shoes";
+    if (source.includes("watch")) return "Watches";
+    if (source.includes("jacket")) return "Jackets";
+    if (source.includes("hoodie")) return "Hoodies";
+    if (["belt", "cap", "bag", "glass"].some((word) => source.includes(word))) return "Accessories";
+    return "Others";
+}
+
+function detectWardrobeColor(name) {
+    const source = String(name || "").toLowerCase();
+    const match = ["black", "white", "blue", "navy", "grey", "gray", "red", "green", "brown", "beige", "cream"].find((color) => source.includes(color));
+    return match ? (match === "gray" ? "Grey" : match[0].toUpperCase() + match.slice(1)) : "Black";
+}
+
+function sameText(left, right) {
+    return String(left || "").toLowerCase() === String(right || "").toLowerCase();
 }
 
 function renderAnalytics(metrics) {
-    document.getElementById("analyticsXp").textContent = metrics.xp;
-    document.getElementById("productivityScore").textContent = `${metrics.productivityScore}%`;
+    const progression = state.progression || {};
+    document.getElementById("analyticsXp").textContent = progression.totalTXP ?? progression.txp ?? metrics.xpProgress ?? 0;
+    document.getElementById("productivityScore").textContent = `${progression.score ?? metrics.productivityScore}%`;
     document.getElementById("productiveReelCount").textContent = metrics.productiveReels;
 
     const categories = {};
@@ -2124,6 +3373,7 @@ function renderMusicSystem() {
     const audio = document.getElementById(AUDIO.bg);
     const isPlaying = audio ? !audio.paused && uiState.musicEnabled !== false : Boolean(uiState.musicPlaying);
     document.body.classList.toggle("music-playing", Boolean(isPlaying));
+    document.body.classList.toggle("music-visible", Boolean(isPlaying || uiState.activeScreen === "music"));
     const titleTargets = ["musicTitle", "miniTitle", "dashboardMusicTitle"];
     const artistTargets = ["musicArtist", "miniArtist", "dashboardMusicArtist"];
     titleTargets.forEach((id) => {
@@ -2156,6 +3406,7 @@ function renderMusicSystem() {
     setIconButton("musicShuffleBtn", "shuffle", "Shuffle");
     setIconButton("musicRepeatBtn", "repeat", "Repeat");
     setIconButton("closePlaylistModal", "close", "Close");
+    setIconButton("goalCloseBtn", "close", "Close");
     setIconButton("playPlaylistBtn", "play", "Play Playlist", "Play Playlist");
     document.querySelectorAll("[data-screen-target='music'].icon-action").forEach((button) => {
         button.innerHTML = `${ICONS.queue}<span>Library</span>`;
@@ -2483,7 +3734,10 @@ async function resetSystemProgress() {
         level: 1,
         rank: "E",
         txp: 0,
-        nextLevelXP: 120,
+        dailyTXP: 0,
+        totalTXP: 0,
+        nextLevelXP: 127,
+        nextLevelTXP: 127,
         streak: 0,
         score: 0,
         tier: "Beginner",
@@ -2538,12 +3792,73 @@ async function syncDailyProgression() {
             throw new Error("Progression API failed");
         }
         state.progression = await response.json();
-        localStorage.setItem(STORAGE_PREFIX + currentUser.email, JSON.stringify(state));
-        renderProgression(calculateMetrics());
+        persistState();
         populateForms();
     } catch (error) {
         showToast("Progression saved locally. Backend sync failed.");
     }
+}
+
+async function rewardTXP(amount, reason) {
+    if (!state || !currentUser || amount <= 0) {
+        persistState();
+        return;
+    }
+    const previous = state.progression || {};
+    try {
+        const response = await fetch("/api/reward-txp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                userKey: currentUser.email,
+                name: state.profile.name || currentUser.name || "Hunter",
+                amount,
+                reason
+            })
+        });
+        if (!response.ok) {
+            throw new Error("Reward API failed");
+        }
+        state.progression = await response.json();
+        persistState();
+        announceProgressionChange(previous, state.progression, amount);
+    } catch (error) {
+        state.progression = applyLocalTxpReward(previous, amount);
+        persistState();
+        showToast(`+${amount} TXP saved locally.`);
+    }
+}
+
+function applyLocalTxpReward(current, amount) {
+    let level = Number(current.level || 1);
+    let txp = Number(current.txp || 0) + amount;
+    let next = calculateNextLevelXP(level);
+    while (level < 100 && txp >= next) {
+        txp -= next;
+        level += 1;
+        next = calculateNextLevelXP(level);
+    }
+    return {
+        ...current,
+        level,
+        txp,
+        nextLevelXP: next,
+        tier: tierForLevel(level),
+        progressPercentage: Math.round((txp / Math.max(1, next)) * 100),
+        levelTitle: `${tierForLevel(level)} LVL ${level}`
+    };
+}
+
+function announceProgressionChange(previous, next, amount) {
+    if (Number(next.level || 1) > Number(previous.level || 1)) {
+        showToast(`LEVEL UP: LVL ${next.level}. ${next.txp} TXP carried forward.`);
+    } else {
+        showToast(`+${amount} TXP earned.`);
+    }
+}
+
+function taskRewardAmount(task) {
+    return Math.max(5, Number(task?.xp ?? task?.TXP ?? task?.txp ?? 20));
 }
 
 async function loadProgressionStatus() {
@@ -2556,8 +3871,7 @@ async function loadProgressionStatus() {
             throw new Error("Status API failed");
         }
         state.progression = await response.json();
-        localStorage.setItem(STORAGE_PREFIX + currentUser.email, JSON.stringify(state));
-        renderProgression(calculateMetrics());
+        persistState();
         populateForms();
     } catch (error) {
         renderProgression(calculateMetrics());
@@ -2576,32 +3890,7 @@ function setRenderedHtml(name, html) {
 
 function bindCursor() {
     const cursor = document.getElementById("kaalixCursor");
-    if (!cursor || window.matchMedia("(pointer: coarse)").matches) {
-        return;
-    }
-    document.addEventListener("pointermove", (event) => {
-        cursor.style.transform = `translate(${event.clientX}px, ${event.clientY}px)`;
-    });
-    document.addEventListener("pointerdown", () => cursor.classList.add("active"));
-    document.addEventListener("pointerup", () => cursor.classList.remove("active"));
-    document.addEventListener("pointerover", (event) => {
-        if (event.target.closest("button,a,label,.card,.list-item,.week-cell")) {
-            cursor.classList.add("hover");
-        }
-    });
-    document.addEventListener("pointerout", (event) => {
-        if (event.target.closest("button,a,label,.card,.list-item,.week-cell")) {
-            cursor.classList.remove("hover");
-        }
-    });
-    document.addEventListener("focusin", (event) => {
-        if (event.target.matches("input,textarea,select,[contenteditable='true']")) {
-            cursor.classList.add("native");
-        }
-    });
-    document.addEventListener("focusout", () => {
-        cursor.classList.remove("native");
-    });
+    if (cursor) cursor.setAttribute("aria-hidden", "true");
 }
 
 function loadUiState() {
@@ -2626,6 +3915,9 @@ function loadUiState() {
             quoteIndex: null,
             songName: "Default background: Statue of God Theme.",
             spotifyLink: "",
+            activeScreen: "dashboard",
+            focusModeActive: false,
+            natureSound: false,
             ...JSON.parse(localStorage.getItem(UI_KEY) || "{}")
         };
     } catch (error) {
@@ -2648,7 +3940,10 @@ function loadUiState() {
             quoteVoiceEnabled: true,
             quoteIndex: null,
             songName: "Default background: Statue of God Theme.",
-            spotifyLink: ""
+            spotifyLink: "",
+            activeScreen: "dashboard",
+            focusModeActive: false,
+            natureSound: false
         };
     }
 }
@@ -2660,6 +3955,7 @@ function saveUiState() {
 function applyUiState() {
     document.body.classList.toggle("sidebar-hidden", Boolean(uiState.sidebarHidden));
     document.body.classList.toggle("study-mode-active", Boolean(uiState.studyMode));
+    document.body.classList.toggle("focus-mode-active", Boolean(uiState.focusModeActive));
     const sidebarToggles = document.querySelectorAll("[data-sidebar-toggle], #sidebarToggle");
     const soundToggle = document.getElementById("soundToggle");
     const musicToggle = document.getElementById("musicToggle");
@@ -2680,6 +3976,10 @@ function applyUiState() {
     }
     if (studyButton) {
         studyButton.textContent = uiState.studyMode ? "Stop Study Sound" : "Study Mode";
+    }
+    const natureToggle = document.getElementById("natureSoundToggle");
+    if (natureToggle) {
+        natureToggle.checked = Boolean(uiState.natureSound);
     }
     const bgMusic = document.getElementById(AUDIO.bg);
     if (bgMusic) {
@@ -3034,6 +4334,57 @@ function windowToTime(window) {
         return "21:15";
     }
     return "19:00";
+}
+
+function setText(id, value) {
+    const node = document.getElementById(id);
+    if (node) {
+        node.textContent = value;
+    }
+}
+
+function calculateNextLevelXP(level) {
+    return 100 + Math.max(1, Math.min(100, Number(level) || 1)) * 20;
+}
+
+function rankCapForLevel(level) {
+    if (level < 11) return "D";
+    if (level < 26) return "C";
+    if (level < 51) return "B";
+    if (level < 76) return "A";
+    if (level < 90) return "S";
+    if (level < 99) return "SS";
+    return "ELITE";
+}
+
+function identityFor(level, rank) {
+    if (String(rank).includes("ELITE") || level >= 99) return "SHADOW MONARCH";
+    if (level >= 76) return "MONARCH";
+    if (level >= 51) return "ELITE";
+    if (level >= 26) return "PERFORMER";
+    if (level >= 11) return "BUILDER";
+    return "SURVIVOR";
+}
+
+function tierForLevel(level) {
+    if (level <= 10) return "Beginner";
+    if (level <= 25) return "Builder";
+    if (level <= 50) return "Performer";
+    if (level <= 75) return "Elite";
+    return "Monarch";
+}
+
+function formatSeconds(totalSeconds) {
+    const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
+    const seconds = Math.max(0, totalSeconds) % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatDate(value) {
+    if (!value) return "Today";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Today";
+    return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
 function escapeAttr(value) {

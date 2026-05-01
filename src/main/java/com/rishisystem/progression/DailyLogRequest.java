@@ -19,6 +19,10 @@ public record DailyLogRequest(
         boolean overthinkingAnger,
         @Min(0) double wastedTime,
         @Min(0) int tasksCompleted,
-        @Min(0) int totalTasks
+        @Min(0) int totalTasks,
+        String priority,
+        String focus,
+        String completion,
+        String actionsData
 ) {
 }
